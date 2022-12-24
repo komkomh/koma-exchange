@@ -102,11 +102,12 @@ class ShardReceiver<T : Any>(private val streamArn: String, val shard: Shard, pr
         // Shardから繰り返しレコードを取得する
         var nextShardIterator: String? = shardIteratorResult.shardIterator()
         do {
+            val loopStart = System.currentTimeMillis()
+            println("${System.currentTimeMillis()} : loop1")
             // レコードを取得する
             val request = GetRecordsRequest.builder().shardIterator(nextShardIterator).build()
             val recordsResult = streamsClient.getRecords(request)
-
-            println("records = ${LocalDateTime.now()} ${recordsResult.records().size}")
+            println("${System.currentTimeMillis()} : loop2")
 
             // worker処理を実行する
             recordsResult.records().forEach { record ->
@@ -118,17 +119,24 @@ class ShardReceiver<T : Any>(private val streamArn: String, val shard: Shard, pr
                         }
                     }
                 }
-                println("end = ${System.currentTimeMillis() - start}")
+                println("recordsEnd = ${System.currentTimeMillis() - start}")
             }
 
+            println("${System.currentTimeMillis()} : ${shardMaster.shardId} loop3")
             // 次のイテレータを設定する
             nextShardIterator = recordsResult.nextShardIterator()
+            println("${System.currentTimeMillis()} : ${shardMaster.shardId} loop4")
 
             // 処理レコードがなければ
             if (recordsResult.records().isEmpty()) {
                 // 1秒間停止する
                 delay(1000)
             }
+            if (shardMaster.shardId != "shardId-00000001671779347318-eb9edf8d") {
+                delay(100000)
+            }
+            println("loopEnd = ${System.currentTimeMillis()} : ${System.currentTimeMillis() - loopStart} : ${shardMaster.shardId} size = ${recordsResult.records().size}")
+
         } while (nextShardIterator != null) // 次のイテレータがなければ終了する
 
         // シャードが終了したことを永続化する
