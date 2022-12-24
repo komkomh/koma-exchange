@@ -101,6 +101,7 @@ class ShardReceiver<T : Any>(private val streamArn: String, val shard: Shard, pr
 
         // Shardから繰り返しレコードを取得する
         var nextShardIterator: String? = shardIteratorResult.shardIterator()
+        var recordZeroCount = 0
         do {
             val loopStart = System.currentTimeMillis()
             println("${System.currentTimeMillis()} : loop1")
@@ -119,7 +120,7 @@ class ShardReceiver<T : Any>(private val streamArn: String, val shard: Shard, pr
                         }
                     }
                 }
-                println("recordsEnd = ${System.currentTimeMillis() - start}")
+                println("recordsEnd = ${System.currentTimeMillis() - start}: recordSize = ${recordsResult.records().size}")
             }
 
             println("${System.currentTimeMillis()} : ${shardMaster.shardId} loop3")
@@ -129,11 +130,11 @@ class ShardReceiver<T : Any>(private val streamArn: String, val shard: Shard, pr
 
             // 処理レコードがなければ
             if (recordsResult.records().isEmpty()) {
+                recordZeroCount++
+            }
+            if (recordZeroCount >= 3) {
                 // 1秒間停止する
                 delay(1000)
-            }
-            if (shardMaster.shardId != "shardId-00000001671779347318-eb9edf8d") {
-                delay(100000)
             }
             println("loopEnd = ${System.currentTimeMillis()} : ${System.currentTimeMillis() - loopStart} : ${shardMaster.shardId} size = ${recordsResult.records().size}")
 
@@ -150,17 +151,14 @@ class ShardReceiver<T : Any>(private val streamArn: String, val shard: Shard, pr
                 val newImage = tableSchema.mapToItem(record.dynamodb().newImage())
                 this.worker.insert(newImage)
             }
-
             OperationType.MODIFY -> {
                 val newImage = tableSchema.mapToItem(record.dynamodb().newImage())
                 this.worker.modify(newImage)
             }
-
             OperationType.REMOVE -> {
                 val oldImage = tableSchema.mapToItem(record.dynamodb().oldImage())
                 this.worker.remove(oldImage)
             }
-
             OperationType.UNKNOWN_TO_SDK_VERSION -> throw RuntimeException("found UNKNOWN_TO_SDK_VERSION")
         }
         // シーケンスNo(どこまで進んだか)を更新する
@@ -176,7 +174,7 @@ class ShardReceiver<T : Any>(private val streamArn: String, val shard: Shard, pr
                 return false
             }
             // 事後処理を行う
-            transaction.successFun()
+            transaction.successFun
         }
         this.shardMaster = nextShardMaster
         return true

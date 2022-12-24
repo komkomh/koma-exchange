@@ -15,6 +15,9 @@ private val dynamoDbClient = DynamoDbEnhancedClient.builder().build()
 private val assetTable: DynamoDbTable<Asset> = dynamoDbClient.table(
     Asset::class.java.simpleName, DataClassTableSchema(Asset::class)
 )
+private val orderTable: DynamoDbTable<Order> = dynamoDbClient.table(
+    Order::class.java.simpleName, DataClassTableSchema(Order::class)
+)
 
 fun main() {
     val assetRepository = AssetRepository()
@@ -29,7 +32,7 @@ fun main() {
         0L, // 作成日時NS
     )
 
-    val transactionRequest = TransactWriteItemsEnhancedRequest
+    val transactionRequestBuilder = TransactWriteItemsEnhancedRequest
         .builder()
         .addUpdateItem(
             assetTable, TransactUpdateItemEnhancedRequest.builder(Asset::class.java)
@@ -44,7 +47,31 @@ fun main() {
                 .item(newAsset)
                 .build()
         )
-        .addPutItem(assetTable, asset2)
-        .build()
-    dynamoDbClient.transactWriteItems(transactionRequest)
+        .addPutItem(assetTable, asset2);
+    val orders = (1L..98L).map { createOrder(it) }
+    orders.forEach { transactionRequestBuilder.addPutItem(orderTable, it) }
+    dynamoDbClient.transactWriteItems(transactionRequestBuilder.build())
+}
+
+fun createOrder(orderId: Long): Order {
+    return Order(
+        CurrencyPair.BTC_JPY, // 通貨ペア
+        orderId, // 注文ID
+        OrderActive.ACTIVE, // 完了しているか
+        10L, // ユーザID
+        OrderSide.SELL, // 売買
+        OrderType.LIMIT, // 注文の方法
+        OrderStatus.UNFILLED, // 注文の状態
+        BigDecimal(999), // 価格
+        BigDecimal(10), // 平均価格
+        BigDecimal(1), // 数量
+        BigDecimal(1), // 残数量
+        TradeAction.TAKER, // メイカーテイカー
+        "", // 処理ID
+        System.nanoTime(), // 更新日時ns
+        System.nanoTime(), // 作成日時ns
+        BigDecimal.ZERO, // 変更数量
+        ActionRequest.ORDER, // 操作要求
+        ActionResult.YET, // 操作結果
+    )
 }
