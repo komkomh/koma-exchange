@@ -8,13 +8,14 @@ fun main() {
     queue.add("hello1")
     queue.add("hello2")
 
-    poll()
-    poll()
-    poll()
+    call()
+    call()
+    call()
+    queue.poll()
 }
 
-fun poll() {
-    val value: String? = queue.poll()
+fun call() {
+    val value: String? = queue.peek()
     if (value == null) {
         println("xx is null")
     }

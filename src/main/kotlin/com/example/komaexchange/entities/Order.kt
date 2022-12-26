@@ -45,7 +45,7 @@ data class Order(
             OrderSide.SELL -> price.compareTo(o.price)
         }
         return when (priceCompare) {
-            0 -> this.createdAtNs.compareTo(o.createdAtNs)
+            0 -> this.orderId.compareTo(o.orderId)
             else -> priceCompare
         }
         // TODO created_sequence_numberにする必要がある

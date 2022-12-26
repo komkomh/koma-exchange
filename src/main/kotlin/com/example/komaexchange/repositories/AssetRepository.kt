@@ -24,7 +24,7 @@ class AssetRepository {
         table.putItem(asset)
     }
 
-    fun findOne(currency: Currency, userId: Long): Asset {
+    fun findOne(userId: Long): Asset {
         val key = Key
             .builder()
             .partitionValue(currency.name)
