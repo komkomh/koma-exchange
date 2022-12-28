@@ -1,60 +1,94 @@
 package com.example.komaexchange.wokrkers
 
+import com.example.komaexchange.entities.ShardMaster
 import kotlinx.coroutines.delay
-import software.amazon.awssdk.enhanced.dynamodb.model.TransactWriteItemsEnhancedRequest
-import java.util.concurrent.ConcurrentLinkedQueue
+import kotlinx.coroutines.sync.Mutex
 import kotlin.reflect.KClass
 
-abstract class Worker<T : Any> {
+abstract class Worker<T : Any>(
+) {
 
-    val queue: Queue<T> = Queue()
+    val shardMaster: ShardMaster = ShardMaster()
+    val mutex = Mutex()
+    private val queue: Queue<T> = Queue()
 
     abstract fun getEntityClazz(): KClass<T>;
     abstract fun new(): Worker<T>;
+    abstract fun execute(t: T?): QueueOrder
 
-    abstract fun insert(t: T): Transaction?
-    abstract fun modify(t: T): Transaction?
-    abstract fun remove(t: T): Transaction?
+    suspend fun receive() {
+
+    }
+
+    suspend fun consume() {
+
+        var entity: T? = queue.peekWait()
+        while (true) {
+            entity = when (execute(entity)) {
+                QueueOrder.CONTINUE -> {
+                    queue.peek()
+                }
+
+                QueueOrder.DONE -> {
+                    queue.done()
+                    queue.peekWait()
+                }
+
+                QueueOrder.RESET -> {
+                    queue.reset()
+                    queue.peekWait()
+                }
+
+                QueueOrder.UNTIL_DONE -> {
+                    queue.untilDone()
+                    queue.peekWait()
+                }
+            }
+        }
+    }
 }
 
 class Queue<T : Any> {
-    val queue: ConcurrentLinkedQueue<T> = ConcurrentLinkedQueue()
-    var peekCount = 0
-    var waitingTime = 0L
-    suspend fun peek(): T {
-        val t = queue.peek()
+    private val queue = mutableListOf<T>()
+    private var peekCount = 0
 
-        if (t == null) {
-            delay(waitingTime)
-            waitingTime = calcNextWaitingTime()
-        }
-        return t
+    fun offer(t: T) {
+        queue.add(t)
     }
 
-    fun calcNextWaitingTime(): Long {
-        if (waitingTime == 0L) {
-            return 1L
-        }
-
-        val newWaitingTime = waitingTime * 2
-        return when (newWaitingTime > 500) {
-            true -> 500
-            false -> newWaitingTime
+    fun peek(): T? {
+        return when (queue.size > peekCount) {
+            true -> queue[peekCount++]
+            false -> null
         }
     }
 
-    fun commit() {
-        (0 until peekCount).forEach { _ -> queue.remove() }
+    suspend fun peekWait(): T {
+        while (true) {
+            when (queue.size > peekCount) {
+                true -> return queue[peekCount++]
+                false -> delay(500)
+            }
+        }
     }
 
-    fun rollback() {
+    fun done() {
+        (0 .. peekCount).forEach { _ -> queue.removeAt(0) }
+    }
+
+    fun untilDone() {
+        (0 until peekCount).forEach { _ -> queue.removeAt(0) }
+    }
+
+    fun reset() {
         peekCount = 0
-        waitingTime = 0L
     }
 }
 
-data class Transaction(
-    val transactionRequestBuilder: TransactWriteItemsEnhancedRequest.Builder,
-    val successFun: () -> Unit
-) {
+enum class QueueOrder {
+    CONTINUE,
+    DONE,
+    UNTIL_DONE,
+    RESET
 }
+

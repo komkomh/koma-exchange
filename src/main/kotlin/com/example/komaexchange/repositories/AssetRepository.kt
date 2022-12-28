@@ -1,7 +1,6 @@
 package com.example.komaexchange.repositories
 
 import com.example.komaexchange.entities.Asset
-import com.example.komaexchange.entities.Currency
 import com.example.komaexchange.entities.CurrencyPair
 import io.andrewohara.dynamokt.DataClassTableSchema
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedClient
@@ -27,8 +26,7 @@ class AssetRepository {
     fun findOne(userId: Long): Asset {
         val key = Key
             .builder()
-            .partitionValue(currency.name)
-            .sortValue(userId)
+            .partitionValue(userId)
             .build()
         return table.getItem(key)
     }

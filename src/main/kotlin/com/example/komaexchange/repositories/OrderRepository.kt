@@ -52,7 +52,7 @@ class OrderRepository {
         return orderTable.query(QueryConditional.keyEqualTo(key)).items().toList()
     }
 
-    fun findActive(currencyPair: CurrencyPair, active: OrderActive): List<Order> {
+    fun findActive(currencyPair: CurrencyPair, active: OrderActive = OrderActive.ACTIVE): List<Order> {
         val key = Key.builder()
             .partitionValue(currencyPair.name)
             .sortValue(active.name)
