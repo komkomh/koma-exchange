@@ -21,13 +21,16 @@ private val orderTable: DynamoDbTable<Order> = dynamoDbClient.table(
 
 fun main() {
     val assetRepository = AssetRepository()
-    val oldAsset = assetRepository.findOne(Currency.JPY, 10L)
-    val newAsset = oldAsset.copy(onHandAmount = BigDecimal(100002), updatedAtNs = 4L)
+    val oldAsset = assetRepository.findOne(10L)
+    val newAsset = oldAsset.copy(
+        jpyOnHandAmount = BigDecimal(100002),
+        updatedAt = 4L
+    )
     val asset2 = Asset(
-        Currency.JPY, // 通貨ペア
         11L, // ユーザID
-        BigDecimal(13), // 資産
-        BigDecimal(0), // ロック資産
+        BigDecimal(13), // JPY資産
+        BigDecimal(13), // BTC資産
+        BigDecimal(13), // ETH資産
         4L, // 更新日時NS
         0L, // 作成日時NS
     )
@@ -39,9 +42,9 @@ fun main() {
                 .conditionExpression(
                     Expression
                         .builder()
-                        .expression("#updatedAtNs = :updatedAtNs")
-                        .putExpressionName("#updatedAtNs", "updatedAtNs")
-                        .putExpressionValue(":updatedAtNs", AttributeValues.numberValue(oldAsset.updatedAtNs))
+                        .expression("#updatedAt = :updatedAt")
+                        .putExpressionName("#updatedAt", "updatedAt")
+                        .putExpressionValue(":updatedAt", AttributeValues.numberValue(oldAsset.updatedAt))
                         .build()
                 )
                 .item(newAsset)
@@ -68,8 +71,8 @@ fun createOrder(orderId: Long): Order {
         BigDecimal(1), // 残数量
         TradeAction.TAKER, // メイカーテイカー
         "", // 処理ID
-        System.nanoTime(), // 更新日時ns
-        System.nanoTime(), // 作成日時ns
+        System.currentTimeMillis(), // 更新日時ms
+        System.currentTimeMillis(), // 作成日時ms
         BigDecimal.ZERO, // 変更数量
         ActionRequest.ORDER, // 操作要求
         ActionResult.YET, // 操作結果

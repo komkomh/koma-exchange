@@ -18,12 +18,12 @@ fun main() {
 
 fun createAsset() {
     val asset1 = Asset(
-        Currency.JPY, // 通貨ペア
         10L, // ユーザID
-        BigDecimal(1000000), // 資産
-        BigDecimal(0), // ロック資産
-        System.nanoTime(), // 更新日時NS
-        System.nanoTime(), // 作成日時NS
+        BigDecimal(1000000), // JPY資産
+        BigDecimal(1000000), // BTC資産
+        BigDecimal(1000000), // ETH資産
+        System.currentTimeMillis(), // 更新日時ms
+        System.currentTimeMillis(), // 作成日時ms
     )
     assetRepository.save(asset1)
 }
@@ -43,8 +43,8 @@ fun two() {
         BigDecimal(1), // 残数量
         TradeAction.TAKER, // メイカーテイカー
         "", // 処理ID
-        System.nanoTime(), // 更新日時ns
-        System.nanoTime(), // 作成日時ns
+        System.currentTimeMillis(), // 更新日時ns
+        System.currentTimeMillis(), // 作成日時ns
         BigDecimal.ZERO, // 変更数量
         ActionRequest.ORDER, // 操作要求
         ActionResult.YET, // 操作結果
@@ -65,8 +65,8 @@ fun two() {
         BigDecimal(1), // 残数量
         TradeAction.TAKER, // メイカーテイカー
         "", // 処理ID
-        System.nanoTime(), // 更新日時ns
-        System.nanoTime(), // 作成日時ns
+        System.currentTimeMillis(), // 更新日時ms
+        System.currentTimeMillis(), // 作成日時ms
         BigDecimal.ZERO, // 変更数量
         ActionRequest.ORDER, // 操作要求
         ActionResult.YET, // 操作結果
@@ -91,8 +91,8 @@ fun random() {
             BigDecimal(1), // 残数量
             TradeAction.TAKER, // メイカーテイカー
             "", // 処理ID
-            System.nanoTime(), // 更新日時ns
-            System.nanoTime(), // 作成日時ns
+            System.currentTimeMillis(), // 更新日時ms
+            System.currentTimeMillis(), // 作成日時ms
             BigDecimal.ZERO, // 変更数量
             ActionRequest.ORDER, // 操作要求
             ActionResult.YET, // 操作結果

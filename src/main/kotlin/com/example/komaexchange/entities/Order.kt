@@ -4,7 +4,6 @@ import io.andrewohara.dynamokt.DynamoKtPartitionKey
 import io.andrewohara.dynamokt.DynamoKtSecondaryPartitionKey
 import io.andrewohara.dynamokt.DynamoKtSecondarySortKey
 import io.andrewohara.dynamokt.DynamoKtSortKey
-import software.amazon.awssdk.enhanced.dynamodb.mapper.annotations.DynamoDbPartitionKey
 import java.math.BigDecimal
 import java.util.*
 
@@ -22,14 +21,14 @@ data class Order(
     val orderSide: OrderSide, // 売買
     val orderType: OrderType, // 注文の方法
     val orderStatus: OrderStatus, // 注文の状態
-    val price: BigDecimal, // 価格
+    val price: BigDecimal?, // 価格
     val averagePrice: BigDecimal, // 平均価格
     val amount: BigDecimal, // 数量
     val remainingAmount: BigDecimal, // 残数量
     val tradeAction: TradeAction, // メイカーテイカー
     val sequenceNumber: String?, // 処理ID
-    val updatedAtNs: Long, // 更新日時ns
-    val createdAtNs: Long, // 作成日時ns
+    val updatedAt: Long, // 更新日時ms
+    val createdAt: Long, // 作成日時ms
     val changeAmount: BigDecimal, // 変更数量
     val actionRequest: ActionRequest, // 操作要求
     val actionResult: ActionResult, // 操作結果
@@ -41,8 +40,8 @@ data class Order(
     // 0は同じと見なされsetに入らないので必ず1, -1を返却する必要がある
     override fun compareTo(o: Order): Int {
         val priceCompare = when (orderSide) {
-            OrderSide.BUY -> o.price.compareTo(price)
-            OrderSide.SELL -> price.compareTo(o.price)
+            OrderSide.BUY -> o.price!!.compareTo(price)
+            OrderSide.SELL -> price!!.compareTo(o.price)
         }
         return when (priceCompare) {
             0 -> this.orderId.compareTo(o.orderId)
@@ -66,28 +65,33 @@ data class Order(
     fun toMakerOrder(): Order {
         return this.copy(
             orderType = OrderType.MARKET,
-            updatedAtNs = System.nanoTime(),
+            updatedAt = System.currentTimeMillis(),
             tradeAction = TradeAction.MAKER,
             actionRequest = ActionRequest.NONE,
             actionResult = ActionResult.ORDER_SUCCEEDED,
         )
     }
 
-    fun createExecutionOrder(targetAmount: BigDecimal): Order {
+    fun createTradedOrder(targetAmount: BigDecimal): Order {
         val newRemainingAmount = remainingAmount - targetAmount
         val orderStatus = OrderStatus.filled(newRemainingAmount)
         return this.copy(
             orderActive = orderStatus.orderActive,
             orderStatus = orderStatus,
             tradeAction = TradeAction.MAKER,
-            updatedAtNs = System.nanoTime(),
+            updatedAt = System.currentTimeMillis(),
             actionRequest = ActionRequest.NONE,
             actionResult = ActionResult.ORDER_SUCCEEDED,
             remainingAmount = newRemainingAmount
         )
     }
 
-    fun createExecutionTrade(targetAmount: BigDecimal, oppositeOrder: Order, oppositeTradeId: String): Trade {
+    fun createTrade(
+        targetAmount: BigDecimal,
+        tradePrice: BigDecimal,
+        oppositeOrder: Order,
+        oppositeTradeId: String
+    ): Trade {
         return Trade(
             currencyPair, // 通貨ペア
             UUID.randomUUID().toString(), // 約定ID
@@ -95,7 +99,7 @@ data class Order(
             orderSide, // 売買
             orderType, // 注文の方法
             orderStatus, // 注文の状態
-            price, // 価格
+            tradePrice, // 価格
             averagePrice, // 平均価格 TODO
             targetAmount, // 数量
             tradeAction, // メイカーテイカー
@@ -104,8 +108,8 @@ data class Order(
             oppositeTradeId, // 約定相手の約定ID
             oppositeOrder.userId, // 約定相手のユーザID
             BigDecimal.ZERO, // 約定手数料 TODO
-            System.nanoTime(), // 更新日時ns
-            System.nanoTime(), // 作成日時ns
+            System.currentTimeMillis(), // 更新日時ms
+            System.currentTimeMillis(), // 作成日時ms
         )
     }
 
@@ -114,7 +118,7 @@ data class Order(
         return this.copy(
             orderActive = orderStatus.orderActive,
             orderStatus = orderStatus,
-            updatedAtNs = System.nanoTime(),
+            updatedAt = System.currentTimeMillis(),
             actionRequest = ActionRequest.NONE,
             actionResult = ActionResult.ORDER_FAILED,
         )

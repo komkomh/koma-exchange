@@ -11,11 +11,11 @@ data class ShardMaster(
     val shardId: String,
     val sequenceNumber: String,
     val shardStatus: ShardStatus,
-    val lockedNs: Long,
+    val lockedMs: Long,
 ) {
-    fun isRunning(currentTimeNs: Long): Boolean {
+    fun isRunning(currentTimeMs: Long): Boolean {
         return ShardStatus.RUNNING == shardStatus
-                && currentTimeNs - lockedNs < 3_000_000
+                && currentTimeMs - lockedMs < 3_000
     }
 
     fun isDone(): Boolean {
@@ -28,14 +28,14 @@ data class ShardMaster(
             shardId,
             nextSequenceNumber,
             ShardStatus.RUNNING,
-            System.nanoTime()
+            System.currentTimeMillis()
         )
     }
 
     fun createDone(): ShardMaster {
         return this.copy(
             shardStatus = ShardStatus.DONE,
-            lockedNs = System.nanoTime()
+            lockedMs = System.currentTimeMillis()
         )
     }
 }

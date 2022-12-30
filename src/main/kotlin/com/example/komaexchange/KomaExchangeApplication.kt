@@ -12,7 +12,7 @@ class KomaExchangeApplication : ApplicationRunner {
         println("hello application runner!")
 
         val receivers = listOf(
-            StreamReceiver(TradeWorker())
+            StreamReceiver()
         )
 
         while (true) {

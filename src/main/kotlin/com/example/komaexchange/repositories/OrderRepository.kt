@@ -76,9 +76,9 @@ class OrderRepository {
                 .conditionExpression(
                     Expression
                         .builder()
-                        .expression("#updatedAtNs = :updatedAtNs")
-                        .putExpressionName("#updatedAtNs", "updatedAtNs")
-                        .putExpressionValue(":updatedAtNs", AttributeValues.numberValue(oldAsset.updatedAtNs))
+                        .expression("#updatedAt = :updatedAt")
+                        .putExpressionName("#updatedAt", "updatedAt")
+                        .putExpressionValue(":updatedAt", AttributeValues.numberValue(oldAsset.updatedAt))
                         .build()
                 )
                 .item(asset)

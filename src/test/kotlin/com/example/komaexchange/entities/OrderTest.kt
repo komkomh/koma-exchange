@@ -1,6 +1,5 @@
 package com.example.komaexchange.entities
 
-import com.example.komaexchange.wokrkers.OrderExecuteWorker
 import org.assertj.core.api.Assertions
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
@@ -37,7 +36,7 @@ class OrderTest {
     }
 }
 
-fun createTestOrder(orderId: Long, orderSide: OrderSide, price: BigDecimal, createdAtNs: Long): Order  {
+fun createTestOrder(orderId: Long, orderSide: OrderSide, price: BigDecimal, createdAtNs: Long): Order {
     return Order(
         CurrencyPair.BTC_JPY, // 通貨ペア
         orderId, // 注文ID

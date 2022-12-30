@@ -43,9 +43,9 @@ class TradeWorkerRepository {
                 assetTable, TransactUpdateItemEnhancedRequest.builder(Asset::class.java)
                     .conditionExpression(
                         Expression.builder()
-                            .expression("#updatedAtNs = :updatedAtNs")
-                            .putExpressionName("#updatedAtNs", "updatedAtNs")
-                            .putExpressionValue(":updatedAtNs", AttributeValues.numberValue(it.first.updatedAtNs))
+                            .expression("#updatedAt = :updatedAt")
+                            .putExpressionName("#updatedAt", "updatedAt")
+                            .putExpressionValue(":updatedAt", AttributeValues.numberValue(it.first.updatedAt))
                             .build()
                     )
                     .item(it.second)

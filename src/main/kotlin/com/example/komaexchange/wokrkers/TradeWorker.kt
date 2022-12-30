@@ -11,7 +11,7 @@ import kotlin.reflect.KClass
 
 private val orderRepository = OrderRepository()
 private val assetRepository = AssetRepository()
-private val orderWorkerRepository = TradeWorkerRepository()
+private val tradeRepository = TradeWorkerRepository()
 
 class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(shardMaster) {
     private var assetCache = mapOf<Long, Asset>() // userIdで資産をキャッシュする
@@ -19,10 +19,6 @@ class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(
     private var orderExecutor = OrderExecutor(maxCount = maxCount)
     override fun getEntityClazz(): KClass<Order> {
         return Order::class
-    }
-
-    override fun new(): Worker<Order> {
-        return TradeWorker(shardMaster)
     }
 
     // TODO 複数通過ペア対応
@@ -95,10 +91,10 @@ class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(
 
         val newShardMaster = shardMaster.copy(
             sequenceNumber = orderExecutor.tradeResultValues.orders.map { it.sequenceNumber }.filterNotNull().max(),
-            lockedNs = System.nanoTime(),
+            lockedMs = System.currentTimeMillis(),
         )
 
-        val result = orderWorkerRepository.saveTransaction(
+        val result = tradeRepository.saveTransaction(
             orderExecutor.tradeResultValues.orders,
             orderExecutor.tradeResultValues.trades,
             orderExecutor.tradeResultValues.assets.map { Pair(assetCache[it.userId]!!, it) }.toSet(),
@@ -180,7 +176,7 @@ data class OrderExecutor(
 
         // 指値でクロスしていないければ
         if (takerOrder.orderType == OrderType.LIMIT && !takerOrder.orderSide.isCross(
-                takerOrder.price,
+                takerOrder.price!!,
                 takerOrder.price
             )
         ) {
@@ -197,12 +193,12 @@ data class OrderExecutor(
 
         // TODO assetを計算する
 
-        val newTakerOrder = takerOrder.createExecutionOrder(tradeAmount)
-        val newMakerOrder = makerOrder.createExecutionOrder(tradeAmount)
+        val newTakerOrder = takerOrder.createTradedOrder(tradeAmount)
+        val newMakerOrder = makerOrder.createTradedOrder(tradeAmount)
         val takerTradeId = UUID.randomUUID().toString()
         val makerTradeId = UUID.randomUUID().toString()
-        val takerTrade = takerOrder.createExecutionTrade(tradeAmount, makerOrder, makerTradeId)
-        val makerTrade = makerOrder.createExecutionTrade(tradeAmount, takerOrder, takerTradeId)
+        val takerTrade = takerOrder.createTrade(tradeAmount, makerOrder.price!!, makerOrder, makerTradeId)
+        val makerTrade = makerOrder.createTrade(tradeAmount, makerOrder.price, takerOrder, takerTradeId)
         return TradeResultValues(
             setOf(newTakerOrder, newMakerOrder),
             setOf(takerTrade, makerTrade),
