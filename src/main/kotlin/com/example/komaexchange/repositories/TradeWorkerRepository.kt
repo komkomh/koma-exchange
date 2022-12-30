@@ -26,13 +26,13 @@ private val shardMasterTable: DynamoDbTable<ShardMaster> = dynamoDbClient.table(
 )
 
 
-class OrderWorkerRepository {
+class TradeWorkerRepository {
 
     fun saveTransaction(
         orders: Set<Order>,
         trades: Set<Trade>,
         assets: Set<Pair<Asset, Asset>>,
-        shardMaster: ShardMaster,
+        shardMaster: ShardMaster?,
     ): TransactionResult {
         val requestBuilder = TransactWriteItemsEnhancedRequest.builder()
         orders.forEach { requestBuilder.addPutItem(orderTable, it) }
@@ -52,7 +52,26 @@ class OrderWorkerRepository {
                     .build()
             )
         }
-        requestBuilder.addPutItem(shardMasterTable, shardMaster)
+
+//        // Shard：sequenceNumberが更新されていればrollback TODO
+//        requestBuilder.addUpdateItem(
+//            shardMasterTable, TransactUpdateItemEnhancedRequest.builder(ShardMaster::class.java)
+//                .conditionExpression(
+//                    Expression.builder()
+//                        .expression("#sequenceNumber = :sequenceNumber")
+//                        .putExpressionName("#sequenceNumber", "sequenceNumber")
+//                        .putExpressionValue(
+//                            ":sequenceNumber",
+//                            AttributeValues.stringValue(shardMaster.first.sequenceNumber)
+//                        )
+//                        .build()
+//                )
+//                .item(shardMaster.second)
+//                .build()
+//        )
+        if (shardMaster != null) {
+            requestBuilder.addPutItem(shardMasterTable, shardMaster)
+        }
 
         return try {
             dynamoDbClient.transactWriteItems(requestBuilder.build())

@@ -32,17 +32,14 @@ data class ShardMaster(
         )
     }
 
-    fun done(): ShardMaster {
-        return ShardMaster(
-            streamArn,
-            shardId,
-            sequenceNumber,
-            ShardStatus.DONE,
-            System.nanoTime()
+    fun createDone(): ShardMaster {
+        return this.copy(
+            shardStatus = ShardStatus.DONE,
+            lockedNs = System.nanoTime()
         )
     }
 }
 
 enum class ShardStatus {
-    CREATED, RUNNING, STOPPED, DONE
+    CREATED, RUNNING, DONE
 }

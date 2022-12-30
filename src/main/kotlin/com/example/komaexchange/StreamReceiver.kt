@@ -3,12 +3,12 @@ package com.example.komaexchange
 import com.example.komaexchange.entities.ShardMaster
 import com.example.komaexchange.entities.ShardStatus
 import com.example.komaexchange.repositories.ShardMasterRepository
+import com.example.komaexchange.wokrkers.Record
 import com.example.komaexchange.wokrkers.Worker
 import io.andrewohara.dynamokt.DataClassTableSchema
 import kotlinx.coroutines.*
 import software.amazon.awssdk.services.dynamodb.model.*
 import software.amazon.awssdk.services.dynamodb.streams.DynamoDbStreamsClient
-import java.time.LocalDateTime
 
 val streamsClient: DynamoDbStreamsClient = DynamoDbStreamsClient.builder().build()
 
@@ -17,7 +17,6 @@ class StreamReceiver<T : Any>(
     private var shardReceiverMap: Map<String, ShardReceiver<T>> = mapOf()
 ) {
     fun execute() {
-
         // ストリームを取得する
         val listStreamRequest = ListStreamsRequest
             .builder()
@@ -36,7 +35,7 @@ class StreamReceiver<T : Any>(
             // 過去分は無視する
             .filter { !shardReceiverMap.containsKey(it.shardId()) }
             // 生成する
-            .map { shard -> ShardReceiver(streamArn, shard, worker.new()).execute() }
+            .map { shard -> ShardReceiver(streamArn, shard, worker.new()) }
             // map形式にする
             .associateBy { it.shard.shardId() }
 
@@ -48,8 +47,6 @@ class StreamReceiver<T : Any>(
 class ShardReceiver<T : Any>(private val streamArn: String, val shard: Shard, private var worker: Worker<T>) {
     var job: Job? = null
     private val shardMasterRepository = ShardMasterRepository()
-
-    //    private val tableSchema = TableSchema.builder(worker.getEntityClazz()).build()
     private val tableSchema = DataClassTableSchema(worker.getEntityClazz())
 
     // シャードマスタを取得、無ければ生成する
@@ -79,21 +76,25 @@ class ShardReceiver<T : Any>(private val streamArn: String, val shard: Shard, pr
 
     private suspend fun receiveRecord() {
         // ShardIteratorRequestを生成する
-        val shardIteratorRequest = if (shardMaster.shardStatus == ShardStatus.CREATED) {
-            GetShardIteratorRequest
-                .builder()
-                .streamArn(streamArn)
-                .shardId(shard.shardId())
-                .shardIteratorType(ShardIteratorType.TRIM_HORIZON)
-                .build()
-        } else {
-            GetShardIteratorRequest
-                .builder()
-                .streamArn(streamArn)
-                .shardId(shard.shardId())
-                .shardIteratorType(ShardIteratorType.AFTER_SEQUENCE_NUMBER)
-                .sequenceNumber(shardMaster.sequenceNumber)
-                .build()
+        val shardIteratorRequest = when (shardMaster.shardStatus) {
+            ShardStatus.CREATED -> {
+                GetShardIteratorRequest
+                    .builder()
+                    .streamArn(streamArn)
+                    .shardId(shard.shardId())
+                    .shardIteratorType(ShardIteratorType.TRIM_HORIZON)
+                    .build()
+            }
+
+            ShardStatus.RUNNING, ShardStatus.DONE -> {
+                GetShardIteratorRequest
+                    .builder()
+                    .streamArn(streamArn)
+                    .shardId(shard.shardId())
+                    .shardIteratorType(ShardIteratorType.AFTER_SEQUENCE_NUMBER)
+                    .sequenceNumber(shardMaster.sequenceNumber)
+                    .build()
+            }
         }
 
         // ShardIteratorを取得する
@@ -102,107 +103,60 @@ class ShardReceiver<T : Any>(private val streamArn: String, val shard: Shard, pr
         // Shardから繰り返しレコードを取得する
         var nextShardIterator: String? = shardIteratorResult.shardIterator()
         var recordZeroCount = 0
-        do {
+        while (nextShardIterator != null) { // 次のイテレータがなければ終了する
             val loopStart = System.currentTimeMillis()
-            println("${System.currentTimeMillis()} : loop1")
             // レコードを取得する
             val request = GetRecordsRequest.builder().shardIterator(nextShardIterator).build()
             val recordsResult = streamsClient.getRecords(request)
-            println("${System.currentTimeMillis()} : loop2")
 
-            // worker処理を実行する
-            recordsResult.records().forEach { record ->
-                val start = System.currentTimeMillis()
-                if (!executeWorker(record)) {
-                    if (!executeWorker(record)) {
-                        if (!executeWorker(record)) {
-                            throw RuntimeException("3回実行してもトランザクション保存できなかった")
-                        }
+            // queueにrecordを登録する
+            recordsResult.records().map { record ->
+                when (record.eventName()!!) {
+                    OperationType.INSERT -> {
+                        Record(
+                            OperationType.INSERT,
+                            record.dynamodb().sequenceNumber(),
+                            tableSchema.mapToItem(record.dynamodb().newImage()),
+                        )
                     }
+
+                    OperationType.MODIFY -> {
+                        Record(
+                            OperationType.MODIFY,
+                            record.dynamodb().sequenceNumber(),
+                            tableSchema.mapToItem(record.dynamodb().newImage()),
+                        )
+                    }
+
+                    OperationType.REMOVE -> {
+                        Record(
+                            OperationType.REMOVE,
+                            record.dynamodb().sequenceNumber(),
+                            tableSchema.mapToItem(record.dynamodb().oldImage()),
+                        )
+                    }
+
+                    OperationType.UNKNOWN_TO_SDK_VERSION -> throw RuntimeException("found UNKNOWN_TO_SDK_VERSION")
                 }
-                println("recordsEnd = ${System.currentTimeMillis() - start}: recordSize = ${recordsResult.records().size}")
+            }.forEach {
+                worker.queue.offer(it)
             }
 
-            println("${System.currentTimeMillis()} : ${shardMaster.shardId} loop3")
-            // 次のイテレータを設定する
-            nextShardIterator = recordsResult.nextShardIterator()
-            println("${System.currentTimeMillis()} : ${shardMaster.shardId} loop4")
-
             // 処理レコードがなければ
-            if (recordsResult.records().isEmpty()) {
-                recordZeroCount++
+            when (recordsResult.records().isEmpty()) {
+                true -> recordZeroCount++
+                false -> recordZeroCount = 0
             }
             if (recordZeroCount >= 3) {
                 // 1秒間停止する
                 delay(1000)
             }
-            println("loopEnd = ${System.currentTimeMillis()} : ${System.currentTimeMillis() - loopStart} : ${shardMaster.shardId} size = ${recordsResult.records().size}")
 
-        } while (nextShardIterator != null) // 次のイテレータがなければ終了する
-
-        // シャードが終了したことを永続化する
-        shardMasterRepository.save(shardMaster.done())
-    }
-
-    // workerを実行する
-    private fun executeWorker(record: Record): Boolean {
-        val transaction = when (record.eventName()!!) {
-            OperationType.INSERT -> {
-                val newImage = tableSchema.mapToItem(record.dynamodb().newImage())
-                this.worker.insert(newImage)
-            }
-            OperationType.MODIFY -> {
-                val newImage = tableSchema.mapToItem(record.dynamodb().newImage())
-                this.worker.modify(newImage)
-            }
-            OperationType.REMOVE -> {
-                val oldImage = tableSchema.mapToItem(record.dynamodb().oldImage())
-                this.worker.remove(oldImage)
-            }
-            OperationType.UNKNOWN_TO_SDK_VERSION -> throw RuntimeException("found UNKNOWN_TO_SDK_VERSION")
+            // 次のイテレータを設定する
+            nextShardIterator = recordsResult.nextShardIterator()
         }
-        // シーケンスNo(どこまで進んだか)を更新する
-        val nextShardMaster = shardMaster.next(record.dynamodb().sequenceNumber())
 
-        println("${System.currentTimeMillis()} : executeWorker3 ")
-        // トランザクション保存する(all or nothing)
-        if (transaction != null) {
-            val transactionResult =
-                shardMasterRepository.saveTransaction(nextShardMaster, transaction.transactionRequestBuilder)
-            println("${System.currentTimeMillis()} : executeWorker4 ")
-            if (!transactionResult) {
-                return false
-            }
-            // 事後処理を行う
-            transaction.successFun
-        }
-        this.shardMaster = nextShardMaster
-        return true
+        // シャードが終了したことを保存する
+        shardMasterRepository.save(shardMaster.createDone()) // TODO shardMasterをqueueに渡す必要がある
     }
-}
-
-enum class ShardReceiveStatus {
-    STILL, RUNNING, STOPPED, DONE;
-
-    companion object {
-        fun getStatus(job: Job?): ShardReceiveStatus {
-            if (job == null) {
-                return STILL
-            }
-            if (job.isActive) {
-                return RUNNING
-            }
-            if (job.isCancelled) {
-                return STOPPED
-            }
-            if (job.isCompleted) {
-                return DONE
-            }
-            throw RuntimeException("ShardExecuteStatus unknown")
-        }
-    }
-}
-
-enum class StreamEvent {
-    INSERT, MODIFY, REMOVE
 }

@@ -1,30 +1,36 @@
 package com.example.komaexchange.wokrkers
 
 import com.example.komaexchange.entities.ShardMaster
-import kotlinx.coroutines.delay
+import com.example.komaexchange.repositories.ShardMasterRepository
+import io.andrewohara.dynamokt.DataClassTableSchema
+import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
+import software.amazon.awssdk.services.dynamodb.model.OperationType
 import kotlin.reflect.KClass
 
-abstract class Worker<T : Any>(
-) {
+private val shardMasterRepository = ShardMasterRepository()
 
-    val shardMaster: ShardMaster = ShardMaster()
-    val mutex = Mutex()
-    private val queue: Queue<T> = Queue()
+abstract class Worker<T : Any>(val shardMaster: ShardMaster) {
 
-    abstract fun getEntityClazz(): KClass<T>;
-    abstract fun new(): Worker<T>;
-    abstract fun execute(t: T?): QueueOrder
+    val mutex: Mutex = Mutex()
+    val queue: Queue<Record<T>> = Queue()
+    val tableSchema = DataClassTableSchema(getEntityClazz())
+    var job: Job? = null
 
-    suspend fun receive() {
+    abstract fun getEntityClazz(): KClass<T>
+    abstract fun new(): Worker<T>
+    abstract fun execute(record: Record<T>?): QueueOrder
 
+    fun execute() {
+        this.job = CoroutineScope(Dispatchers.Default).launch {
+            consumeQueue()
+        }
     }
 
-    suspend fun consume() {
-
-        var entity: T? = queue.peekWait()
+    suspend fun consumeQueue() {
+        var record: Record<T>? = queue.peekWait()
         while (true) {
-            entity = when (execute(entity)) {
+            record = when (execute(record)) {
                 QueueOrder.CONTINUE -> {
                     queue.peek()
                 }
@@ -73,7 +79,7 @@ class Queue<T : Any> {
     }
 
     fun done() {
-        (0 .. peekCount).forEach { _ -> queue.removeAt(0) }
+        (0..peekCount).forEach { _ -> queue.removeAt(0) }
     }
 
     fun untilDone() {
@@ -90,5 +96,8 @@ enum class QueueOrder {
     DONE,
     UNTIL_DONE,
     RESET
+}
+
+data class Record<T : Any>(val operationType: OperationType, val sequenceNumber: String, val t: T) {
 }
 
