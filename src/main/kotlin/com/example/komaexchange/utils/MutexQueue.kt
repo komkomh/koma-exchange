@@ -10,10 +10,11 @@ class MutexQueue<T : Any> {
     private val queue = mutableListOf<T>()
     private var peekCount = 0
 
-    suspend fun offer(t: T) {
+    suspend fun offer(t: T): T {
         mutex.withLock {
             queue.add(t)
         }
+        return t
     }
 
     suspend fun peek(): T? {
@@ -38,19 +39,27 @@ class MutexQueue<T : Any> {
 
     suspend fun done() {
         mutex.withLock {
-            (0..peekCount).forEach { _ -> queue.removeAt(0) }
+            (0 until peekCount).forEach { _ -> queue.removeAt(0) }
+            peekCount = 0
         }
     }
 
     suspend fun untilDone() {
         mutex.withLock {
-            (0 until peekCount).forEach { _ -> queue.removeAt(0) }
+            (0 until peekCount-1).forEach { _ -> queue.removeAt(0) }
+            peekCount = 0
         }
     }
 
     suspend fun reset() {
         mutex.withLock {
             peekCount = 0
+        }
+    }
+
+    suspend fun size(): Int {
+        mutex.withLock {
+            return queue.size
         }
     }
 }

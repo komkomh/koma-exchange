@@ -26,7 +26,7 @@ abstract class Worker<T : Any>(val shardMaster: ShardMaster) {
 
     abstract fun execute(record: Record<T>?): QueueOrder
 
-    fun execute() {
+    fun start() {
         // 処理中、処理済みなら
         if (shardMaster.isDone() || shardMaster.isRunning(System.currentTimeMillis())) {
             // 何もしない
