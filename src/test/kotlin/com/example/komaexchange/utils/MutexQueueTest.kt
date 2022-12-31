@@ -1,7 +1,8 @@
 package com.example.komaexchange.workers
 
 import com.example.komaexchange.entities.*
-import com.example.komaexchange.utils.MutexQueue
+import com.example.komaexchange.utils.RecordQueue
+import com.example.komaexchange.wokrkers.Record
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.assertj.core.api.Assertions
@@ -11,11 +12,11 @@ import org.junit.jupiter.api.Test
 
 class MutexQueueTest {
     // テスト対象
-    var queue = MutexQueue<SampleEntity>()
+    var queue = RecordQueue<SampleEntity>()
 
     @BeforeEach
     fun init() {
-        queue = MutexQueue<SampleEntity>()
+        queue = RecordQueue<SampleEntity>()
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -26,7 +27,7 @@ class MutexQueueTest {
         val peek1 = queue.peek()
 
         // 確認
-        Assertions.assertThat(peek1).`as`("投入していないのでnullが取得される").isNull()
+        Assertions.assertThat(peek1).`as`("投入していないのでNONE").isEqualTo(Record.NONE)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -34,7 +35,7 @@ class MutexQueueTest {
     @DisplayName("1件取得")
     fun peek1() = runTest {
         // 準備
-        val entity1 = queue.offer(SampleEntity.create(1L))
+        val entity1 = queue.offer(Record.INSERTED("", SampleEntity.create(1L)))
 
         // 実行
         val peek1 = queue.peek()
@@ -42,7 +43,7 @@ class MutexQueueTest {
 
         // 確認
         Assertions.assertThat(peek1).`as`("1件取得される").isEqualTo(entity1)
-        Assertions.assertThat(peek2).`as`("投入されていないのでnull").isNull()
+        Assertions.assertThat(peek2).`as`("投入されていないのでNONE").isEqualTo(Record.NONE)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -50,8 +51,8 @@ class MutexQueueTest {
     @DisplayName("2件取得")
     fun peek2() = runTest {
         // 準備
-        val entity1 = queue.offer(SampleEntity.create(1L))
-        val entity2 = queue.offer(SampleEntity.create(2L))
+        val entity1 = queue.offer(Record.INSERTED("", SampleEntity.create(1L)))
+        val entity2 = queue.offer(Record.INSERTED("", SampleEntity.create(2L)))
 
         // 実行
         val peek1 = queue.peek()
@@ -61,7 +62,7 @@ class MutexQueueTest {
         // 確認
         Assertions.assertThat(peek1).`as`("1件取得される").isEqualTo(entity1)
         Assertions.assertThat(peek2).`as`("1件取得される").isEqualTo(entity2)
-        Assertions.assertThat(peek3).`as`("投入されていないのでnull").isNull()
+        Assertions.assertThat(peek3).`as`("投入されていないのでNONE").isEqualTo(Record.NONE)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -69,8 +70,8 @@ class MutexQueueTest {
     @DisplayName("2件取得")
     fun peekWait1() = runTest {
         // 準備
-        val entity1 = queue.offer(SampleEntity.create(1L))
-        val entity2 = queue.offer(SampleEntity.create(2L))
+        val entity1 = queue.offer(Record.INSERTED("", SampleEntity.create(1L)))
+        val entity2 = queue.offer(Record.INSERTED("", SampleEntity.create(2L)))
 
         // 実行
         val peek1 = queue.peekWait()
@@ -86,13 +87,13 @@ class MutexQueueTest {
     @DisplayName("2件取得後にリセット")
     fun reset1() = runTest {
         // 準備
-        val entity1 = queue.offer(SampleEntity.create(1L))
-        val entity2 = queue.offer(SampleEntity.create(2L))
+        val entity1 = queue.offer(Record.INSERTED("", SampleEntity.create(1L)))
+        queue.offer(Record.INSERTED("", SampleEntity.create(2L)))
 
         // 実行
-        val peek1 = queue.peek()
-        val peek2 = queue.peek()
-        val peek3 = queue.peek()
+        queue.peek()
+        queue.peek()
+        queue.peek()
         queue.reset()
         val peek4 = queue.peek()
 
@@ -106,8 +107,8 @@ class MutexQueueTest {
     @DisplayName("2件取得後にコミット")
     fun done1() = runTest {
         // 準備
-        val entity1 = queue.offer(SampleEntity.create(1L))
-        val entity2 = queue.offer(SampleEntity.create(2L))
+        val entity1 = queue.offer(Record.INSERTED("", SampleEntity.create(1L)))
+        val entity2 = queue.offer(Record.INSERTED("", SampleEntity.create(2L)))
 
         // 実行
         val peek1 = queue.peek()
@@ -119,8 +120,8 @@ class MutexQueueTest {
         // 確認
         Assertions.assertThat(peek1).`as`("1件取得される").isEqualTo(entity1)
         Assertions.assertThat(peek2).`as`("1件取得される").isEqualTo(entity2)
-        Assertions.assertThat(peek3).`as`("投入されていないのでnull").isNull()
-        Assertions.assertThat(peek4).`as`("投入されていないのでnull").isNull()
+        Assertions.assertThat(peek3).`as`("投入されていないのでNONE").isEqualTo(Record.NONE)
+        Assertions.assertThat(peek4).`as`("投入されていないのでNONE").isEqualTo(Record.NONE)
         Assertions.assertThat(queue.size()).`as`("確定されたので0").isEqualTo(0)
     }
 
@@ -129,8 +130,8 @@ class MutexQueueTest {
     @DisplayName("2件取得後に1件前まで確定されて1件残")
     fun untilDone1() = runTest {
         // 準備
-        val entity1 = queue.offer(SampleEntity.create(1L))
-        val entity2 = queue.offer(SampleEntity.create(2L))
+        val entity1 = queue.offer(Record.INSERTED("", SampleEntity.create(1L)))
+        val entity2 = queue.offer(Record.INSERTED("", SampleEntity.create(2L)))
 
         // 実行
         val peek1 = queue.peek()
@@ -142,7 +143,7 @@ class MutexQueueTest {
         // 確認
         Assertions.assertThat(peek1).`as`("1件取得される").isEqualTo(entity1)
         Assertions.assertThat(peek2).`as`("1件取得される").isEqualTo(entity2)
-        Assertions.assertThat(peek3).`as`("投入されていないのでnull").isNull()
+        Assertions.assertThat(peek3).`as`("投入されていないのでNONE").isEqualTo(Record.NONE)
         Assertions.assertThat(peek4).`as`("戻されたので1件取得される").isEqualTo(entity2)
         Assertions.assertThat(queue.size()).`as`("片方戻されたので1").isEqualTo(1)
     }

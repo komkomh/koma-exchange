@@ -4,7 +4,7 @@ import com.example.komaexchange.entities.ShardMaster
 import com.example.komaexchange.entities.ShardStatus
 import com.example.komaexchange.repositories.ShardMasterRepository
 import com.example.komaexchange.streamsClient
-import com.example.komaexchange.utils.MutexQueue
+import com.example.komaexchange.utils.RecordQueue
 import io.andrewohara.dynamokt.DataClassTableSchema
 import kotlinx.coroutines.*
 import software.amazon.awssdk.services.dynamodb.model.GetRecordsRequest
@@ -13,11 +13,9 @@ import software.amazon.awssdk.services.dynamodb.model.OperationType
 import software.amazon.awssdk.services.dynamodb.model.ShardIteratorType
 import kotlin.reflect.KClass
 
-private val shardMasterRepository = ShardMasterRepository()
-
 abstract class Worker<T : Any>(val shardMaster: ShardMaster) {
 
-    val queue: MutexQueue<OperationRecord> = MutexQueue()
+    val queue: RecordQueue<T> = RecordQueue()
     private val tableSchema = DataClassTableSchema(getEntityClazz())
     var receiveJob: Job? = null
     var consumeJob: Job? = null
@@ -29,16 +27,9 @@ abstract class Worker<T : Any>(val shardMaster: ShardMaster) {
         }
     }
 
-    sealed class OperationRecord() {
-        data class INSERT<T : Any>(val sequenceNumber: String, val t: T) : OperationRecord()
-        data class MODIFY<T : Any>(val sequenceNumber: String, val t: T) : OperationRecord()
-        data class REMOVE<T : Any>(val sequenceNumber: String, val t: T) : OperationRecord()
-        object FINISHED : OperationRecord()
-    }
-
     abstract fun getEntityClazz(): KClass<T>
 
-    abstract fun execute(record: Record<T>?): QueueOrder
+    abstract fun execute(record: Record<T>): QueueOrder
 
     fun start() {
         // 処理中、処理済みなら
@@ -93,56 +84,20 @@ abstract class Worker<T : Any>(val shardMaster: ShardMaster) {
             val request = GetRecordsRequest.builder().shardIterator(nextShardIterator).build()
             val recordsResult = streamsClient.getRecords(request)
 
-//            // queueにrecordを登録する
-//            recordsResult.records().map { record ->
-//                when (record.eventName()!!) {
-//                    OperationType.INSERT -> {
-//                        Record(
-//                            OperationType.INSERT,
-//                            record.dynamodb().sequenceNumber(),
-//                            tableSchema.mapToItem(record.dynamodb().newImage()),
-//                            false,
-//                        )
-//                    }
-//
-//                    OperationType.MODIFY -> {
-//                        Record(
-//                            OperationType.MODIFY,
-//                            record.dynamodb().sequenceNumber(),
-//                            tableSchema.mapToItem(record.dynamodb().newImage()),
-//                            false,
-//                        )
-//                    }
-//
-//                    OperationType.REMOVE -> {
-//                        Record(
-//                            OperationType.REMOVE,
-//                            record.dynamodb().sequenceNumber(),
-//                            tableSchema.mapToItem(record.dynamodb().oldImage()),
-//                            false,
-//                        )
-//                    }
-//
-//                    OperationType.UNKNOWN_TO_SDK_VERSION -> throw RuntimeException("found UNKNOWN_TO_SDK_VERSION")
-//                }
-//            }.forEach {
-//                queue.offer(it)
-//            }
-
             // queueにrecordを登録する
             recordsResult.records().map { record ->
                 when (record.eventName()!!) {
-                    OperationType.INSERT -> OperationRecord.INSERT(
+                    OperationType.INSERT -> Record.INSERTED(
                         record.dynamodb().sequenceNumber(),
                         tableSchema.mapToItem(record.dynamodb().newImage())
                     )
 
-                    OperationType.MODIFY -> OperationRecord.MODIFY(
+                    OperationType.MODIFY -> Record.MODIFIED(
                         record.dynamodb().sequenceNumber(),
                         tableSchema.mapToItem(record.dynamodb().newImage())
                     )
 
-                    OperationType.REMOVE -> OperationRecord.REMOVE(
+                    OperationType.REMOVE -> Record.REMOVED(
                         record.dynamodb().sequenceNumber(),
                         tableSchema.mapToItem(record.dynamodb().oldImage())
                     )
@@ -167,9 +122,8 @@ abstract class Worker<T : Any>(val shardMaster: ShardMaster) {
             nextShardIterator = recordsResult.nextShardIterator()
         }
 
-        // シャードが終了したことを保存する
-        queue.offer()
-        shardMasterRepository.save(shardMaster.createDone()) // TODO shardMasterをqueueに渡す必要がある
+        // シャードが終了したことを伝える
+        queue.offer(Record.FINISHED)
     }
 
     suspend fun consumeQueue() {
@@ -177,20 +131,10 @@ abstract class Worker<T : Any>(val shardMaster: ShardMaster) {
         while (true) {
             val record = when (queueOrder) {
                 QueueOrder.CONTINUE -> queue.peek()
-                QueueOrder.DONE -> {
-                    val currentRecord = queue.done().peekWait()
-                    when (currentRecord.finished) {
-                        true -> {
-                            shardMasterRepository.save(shardMaster.createDone())
-                            return
-                        }
-
-                        false -> currentRecord
-                    }
-                }
-
+                QueueOrder.DONE -> queue.done().peekWait()
                 QueueOrder.RESET -> queue.reset().peekWait()
                 QueueOrder.UNTIL_DONE -> queue.untilDone().peekWait()
+                QueueOrder.QUIT -> break
             }
             queueOrder = execute(record)
         }
@@ -201,15 +145,16 @@ enum class QueueOrder {
     CONTINUE,
     DONE,
     UNTIL_DONE,
-    RESET
+    RESET,
+    QUIT
 }
 
-data class Record<T : Any>(
-    val operationType: OperationType,
-    val sequenceNumber: String,
-    val t: T,
-    val finished: Boolean
-) {
+sealed class Record<out T: Any>() {
+    data class INSERTED<out T: Any>(val sequenceNumber: String, val t: T) : Record<T>()
+    data class MODIFIED<out T: Any>(val sequenceNumber: String, val t: T) : Record<T>()
+    data class REMOVED<out T: Any>(val sequenceNumber: String, val t: T) : Record<T>()
+    object NONE : Record<Nothing>()
+    object FINISHED : Record<Nothing>()
 }
 
 

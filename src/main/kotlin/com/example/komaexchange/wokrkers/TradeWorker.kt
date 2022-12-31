@@ -3,8 +3,8 @@ package com.example.komaexchange.wokrkers
 import com.example.komaexchange.entities.*
 import com.example.komaexchange.repositories.AssetRepository
 import com.example.komaexchange.repositories.OrderRepository
+import com.example.komaexchange.repositories.ShardMasterRepository
 import com.example.komaexchange.repositories.TradeWorkerRepository
-import software.amazon.awssdk.services.dynamodb.model.OperationType
 import java.math.BigDecimal
 import java.util.*
 import kotlin.reflect.KClass
@@ -12,6 +12,7 @@ import kotlin.reflect.KClass
 private val orderRepository = OrderRepository()
 private val assetRepository = AssetRepository()
 private val tradeRepository = TradeWorkerRepository()
+private val shardMasterRepository = ShardMasterRepository()
 
 class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(shardMaster) {
     private var assetCache = mapOf<Long, Asset>() // userIdで資産をキャッシュする
@@ -22,21 +23,26 @@ class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(
     }
 
     // TODO 複数通過ペア対応
-    override fun execute(record: Record<Order>?): QueueOrder {
-
-        // 注文がなければ
-        if (record == null) {
-            return when (saveAndMerge()) {
-                TransactionResult.SUCCESS -> QueueOrder.DONE // これまで分を確定する
-                TransactionResult.FAILURE -> QueueOrder.RESET // 注文再送を依頼する
+    override fun execute(record: Record<Order>): QueueOrder {
+        return when (record) {
+            is Record.INSERTED -> insert(record.t.copy(sequenceNumber = record.sequenceNumber))
+            is Record.MODIFIED -> modify(record.t)
+            is Record.REMOVED -> remove(record.t)
+            is Record.NONE -> {
+                return when (saveAndMerge()) {
+                    TransactionResult.SUCCESS -> QueueOrder.DONE // これまで分を確定する
+                    TransactionResult.FAILURE -> QueueOrder.RESET // 注文再送を依頼する
+                }
             }
-        }
-
-        return when (record.operationType) {
-            OperationType.INSERT -> insert(record.t.copy(sequenceNumber = record.sequenceNumber))
-            OperationType.MODIFY -> modify(record.t)
-            OperationType.REMOVE -> remove(record.t)
-            OperationType.UNKNOWN_TO_SDK_VERSION -> throw RuntimeException("found UNKNOWN_TO_SDK_VERSION")
+            is Record.FINISHED -> {
+                return when (saveAndMerge()) {
+                    TransactionResult.SUCCESS -> {
+                        shardMasterRepository.save(shardMaster.createDone())
+                        QueueOrder.QUIT
+                    } // これまで分を確定する
+                    TransactionResult.FAILURE -> QueueOrder.RESET // 注文再送を依頼する
+                }
+            }
         }
     }
 

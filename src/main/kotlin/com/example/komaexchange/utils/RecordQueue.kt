@@ -1,41 +1,40 @@
 package com.example.komaexchange.utils
 
+import com.example.komaexchange.wokrkers.Record
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 // TODO shard終了時の考慮を入れる
-class MutexQueue<T : Any> {
+class RecordQueue<T : Any> {
     private val mutex: Mutex = Mutex()
-    private val queue = mutableListOf<T>()
+    private val queue = mutableListOf<Record<T>>()
     private var peekCount = 0
 
-    suspend fun offer(t: T): T {
-        mutex.withLock {
-            queue.add(t)
-        }
+    suspend fun offer(t: Record<T>): Record<T> {
+        mutex.withLock { queue.add(t) }
         return t
     }
 
-    suspend fun peek(): T? {
+    suspend fun peek(): Record<T> {
         mutex.withLock {
             return when (queue.size > peekCount) {
                 true -> queue[peekCount++]
-                false -> null
+                false -> Record.NONE
             }
         }
     }
 
-    suspend fun peekWait(): T {
+    suspend fun peekWait(): Record<T> {
         while (true) {
             when(val t = peek()) {
-                null -> delay(500)
+                is Record.NONE -> delay(500)
                 else -> return t
             }
         }
     }
 
-    suspend fun done(): MutexQueue<T> {
+    suspend fun done(): RecordQueue<T> {
         mutex.withLock {
             (0 until peekCount).forEach { _ -> queue.removeAt(0) }
             peekCount = 0
@@ -43,7 +42,7 @@ class MutexQueue<T : Any> {
         return this
     }
 
-    suspend fun untilDone(): MutexQueue<T> {
+    suspend fun untilDone(): RecordQueue<T> {
         mutex.withLock {
             (0 until peekCount-1).forEach { _ -> queue.removeAt(0) }
             peekCount = 0
@@ -51,7 +50,7 @@ class MutexQueue<T : Any> {
         return this
     }
 
-    suspend fun reset(): MutexQueue<T> {
+    suspend fun reset(): RecordQueue<T> {
         mutex.withLock { peekCount = 0 }
         return this
     }
