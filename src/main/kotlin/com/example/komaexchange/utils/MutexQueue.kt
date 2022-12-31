@@ -27,39 +27,36 @@ class MutexQueue<T : Any> {
     }
 
     suspend fun peekWait(): T {
-        mutex.withLock {
-            while (true) {
-                when (queue.size > peekCount) {
-                    true -> return queue[peekCount++]
-                    false -> delay(500)
-                }
+        while (true) {
+            when(val t = peek()) {
+                null -> delay(500)
+                else -> return t
             }
         }
     }
 
-    suspend fun done() {
+    suspend fun done(): MutexQueue<T> {
         mutex.withLock {
             (0 until peekCount).forEach { _ -> queue.removeAt(0) }
             peekCount = 0
         }
+        return this
     }
 
-    suspend fun untilDone() {
+    suspend fun untilDone(): MutexQueue<T> {
         mutex.withLock {
             (0 until peekCount-1).forEach { _ -> queue.removeAt(0) }
             peekCount = 0
         }
+        return this
     }
 
-    suspend fun reset() {
-        mutex.withLock {
-            peekCount = 0
-        }
+    suspend fun reset(): MutexQueue<T> {
+        mutex.withLock { peekCount = 0 }
+        return this
     }
 
     suspend fun size(): Int {
-        mutex.withLock {
-            return queue.size
-        }
+        return mutex.withLock { queue.size }
     }
 }

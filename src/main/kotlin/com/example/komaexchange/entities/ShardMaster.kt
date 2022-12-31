@@ -9,13 +9,14 @@ data class ShardMaster(
 
     @DynamoKtSortKey
     val shardId: String,
-    val sequenceNumber: String,
+    val parentShardId: String?,
+    val sequenceNumber: String?,
     val shardStatus: ShardStatus,
     val lockedMs: Long,
 ) {
     fun isRunning(currentTimeMs: Long): Boolean {
         return ShardStatus.RUNNING == shardStatus
-                && currentTimeMs - lockedMs < 3_000
+                && currentTimeMs - lockedMs < 60_000
     }
 
     fun isDone(): Boolean {
@@ -26,6 +27,7 @@ data class ShardMaster(
         return ShardMaster(
             streamArn,
             shardId,
+            parentShardId,
             nextSequenceNumber,
             ShardStatus.RUNNING,
             System.currentTimeMillis()
