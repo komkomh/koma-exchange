@@ -17,8 +17,7 @@ private val assetTable: DynamoDbTable<Asset> = dynamoDbClient.table(
 )
 
 fun main() {
-    val assetRepository = AssetRepository()
-    val oldAsset = assetRepository.findOne(10L)
+    val oldAsset = AssetRepository.findOne(10L)
     val newAsset = oldAsset.copy(jpyOnHandAmount = BigDecimal(100002), updatedAt = 4L)
     val asset2 = Asset(
         11L, // ユーザID

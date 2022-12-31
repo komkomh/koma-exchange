@@ -10,7 +10,6 @@ import software.amazon.awssdk.services.dynamodb.model.StreamStatus
 import software.amazon.awssdk.services.dynamodb.streams.DynamoDbStreamsClient
 
 val streamsClient: DynamoDbStreamsClient = DynamoDbStreamsClient.builder().build()
-private val shardMasterRepository = ShardMasterRepository()
 
 class StreamReceiver(
     private val activeStreams: MutableList<Stream> = mutableListOf(),
@@ -35,7 +34,7 @@ class StreamReceiver(
         // アクティブなシャードマスタをDBから取得する
         val shardMasters = activeShards
             .map {
-                shardMasterRepository.findOne(it.first, it.second.shardId()) ?: ShardMaster(
+                ShardMasterRepository.findOne(it.first, it.second.shardId()) ?: ShardMaster(
                     it.first,
                     it.second.shardId(),
                     it.second.parentShardId(),

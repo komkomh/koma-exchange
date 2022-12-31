@@ -1,19 +1,10 @@
 package com.example.komaexchange.repositories
 
 import com.example.komaexchange.entities.ShardMaster
-import io.andrewohara.dynamokt.DataClassTableSchema
-import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedClient
-import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable
 import software.amazon.awssdk.enhanced.dynamodb.Key
 import software.amazon.awssdk.enhanced.dynamodb.model.QueryConditional
 
-private val dynamoDbClient = DynamoDbEnhancedClient.builder().build()
-
-private val shardMasterTable: DynamoDbTable<ShardMaster> = dynamoDbClient.table(
-    ShardMaster::class.java.simpleName, DataClassTableSchema(ShardMaster::class)
-)
-
-class ShardMasterRepository {
+object ShardMasterRepository {
 
     fun createTable() {
         shardMasterTable.createTable();

@@ -9,10 +9,6 @@ import java.math.BigDecimal
 import java.util.*
 import kotlin.reflect.KClass
 
-private val orderRepository = OrderRepository()
-private val assetRepository = AssetRepository()
-private val tradeRepository = TradeWorkerRepository()
-private val shardMasterRepository = ShardMasterRepository()
 
 class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(shardMaster) {
     private var assetCache = mapOf<Long, Asset>() // userIdで資産をキャッシュする
@@ -34,10 +30,11 @@ class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(
                     TransactionResult.FAILURE -> QueueOrder.RESET // 注文再送を依頼する
                 }
             }
+
             is Record.FINISHED -> {
                 return when (saveAndMerge()) {
                     TransactionResult.SUCCESS -> {
-                        shardMasterRepository.save(shardMaster.createDone())
+                        ShardMasterRepository.save(shardMaster.createDone())
                         QueueOrder.QUIT
                     } // これまで分を確定する
                     TransactionResult.FAILURE -> QueueOrder.RESET // 注文再送を依頼する
@@ -51,7 +48,7 @@ class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(
         if (activeOrderCache.isEmpty()) {
             // キャッシュを取得する
             activeOrderCache =
-                orderRepository.findActive(order.currencyPair).filter { it.sequenceNumber != null }.toSet()
+                OrderRepository.findActive(order.currencyPair).filter { it.sequenceNumber != null }.toSet()
             // 約定実行を初期化する
             orderExecutor.init(assetCache, activeOrderCache)
         }
@@ -100,7 +97,7 @@ class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(
             lockedMs = System.currentTimeMillis(),
         )
 
-        val result = tradeRepository.saveTransaction(
+        val result = TradeWorkerRepository.saveTransaction(
             orderExecutor.tradeResultValues.orders,
             orderExecutor.tradeResultValues.trades,
             orderExecutor.tradeResultValues.assets.map { Pair(assetCache[it.userId]!!, it) }.toSet(),
@@ -160,7 +157,7 @@ data class OrderExecutor(
 
     private fun cacheAndGetAsset(userId: Long): Asset {
         if (!assetMap.containsKey(userId)) {
-            assetMap[userId] = assetRepository.findOne(userId)
+            assetMap[userId] = AssetRepository.findOne(userId)
         }
         return assetMap[userId]!!
     }

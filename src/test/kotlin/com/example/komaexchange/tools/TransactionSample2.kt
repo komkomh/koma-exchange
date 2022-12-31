@@ -20,8 +20,7 @@ private val orderTable: DynamoDbTable<Order> = dynamoDbClient.table(
 )
 
 fun main() {
-    val assetRepository = AssetRepository()
-    val oldAsset = assetRepository.findOne(10L)
+    val oldAsset = AssetRepository.findOne(10L)
     val newAsset = oldAsset.copy(
         jpyOnHandAmount = BigDecimal(100002),
         updatedAt = 4L

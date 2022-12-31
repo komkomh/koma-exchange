@@ -6,9 +6,6 @@ import com.example.komaexchange.repositories.AssetRepository
 import com.example.komaexchange.repositories.OrderRepository
 import java.math.BigDecimal
 
-private val orderRepository = OrderRepository()
-private val assetRepository = AssetRepository()
-
 fun main() {
     println("order create!");
 //    createAsset()
@@ -25,7 +22,7 @@ fun createAsset() {
         System.currentTimeMillis(), // 更新日時ms
         System.currentTimeMillis(), // 作成日時ms
     )
-    assetRepository.save(asset1)
+    AssetRepository.save(asset1)
 }
 
 fun two() {
@@ -49,7 +46,7 @@ fun two() {
         ActionRequest.ORDER, // 操作要求
         ActionResult.YET, // 操作結果
     )
-    orderRepository.save(buyOrder)
+    OrderRepository.save(buyOrder)
 
     val sellOrder = Order(
         CurrencyPair.BTC_JPY, // 通貨ペア
@@ -71,7 +68,7 @@ fun two() {
         ActionRequest.ORDER, // 操作要求
         ActionResult.YET, // 操作結果
     )
-    orderRepository.save(sellOrder)
+    OrderRepository.save(sellOrder)
 }
 
 fun random() {
@@ -97,7 +94,7 @@ fun random() {
             ActionRequest.ORDER, // 操作要求
             ActionResult.YET, // 操作結果
         )
-        orderRepository.save(order)
+        OrderRepository.save(order)
     }
 }
 

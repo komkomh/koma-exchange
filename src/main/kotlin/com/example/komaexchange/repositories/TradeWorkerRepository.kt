@@ -1,32 +1,14 @@
 package com.example.komaexchange.repositories
 
 import com.example.komaexchange.entities.*
-import io.andrewohara.dynamokt.DataClassTableSchema
-import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedClient
-import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable
 import software.amazon.awssdk.enhanced.dynamodb.Expression
 import software.amazon.awssdk.enhanced.dynamodb.internal.AttributeValues
 import software.amazon.awssdk.enhanced.dynamodb.model.TransactUpdateItemEnhancedRequest
 import software.amazon.awssdk.enhanced.dynamodb.model.TransactWriteItemsEnhancedRequest
 import software.amazon.awssdk.services.dynamodb.model.TransactionCanceledException
 
-private val dynamoDbClient = DynamoDbEnhancedClient.builder().build()
-private val orderTable: DynamoDbTable<Order> = dynamoDbClient.table(
-    Order::class.java.simpleName, DataClassTableSchema(Order::class)
-)
-private val tradeTable: DynamoDbTable<Trade> = dynamoDbClient.table(
-    Trade::class.java.simpleName, DataClassTableSchema(Trade::class)
-)
-private val assetTable: DynamoDbTable<Asset> = dynamoDbClient.table(
-    Asset::class.java.simpleName, DataClassTableSchema(Asset::class)
-)
 
-private val shardMasterTable: DynamoDbTable<ShardMaster> = dynamoDbClient.table(
-    ShardMaster::class.java.simpleName, DataClassTableSchema(ShardMaster::class)
-)
-
-
-class TradeWorkerRepository {
+object TradeWorkerRepository {
 
     fun saveTransaction(
         orders: Set<Order>,

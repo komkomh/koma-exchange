@@ -8,9 +8,7 @@ import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable
 import software.amazon.awssdk.enhanced.dynamodb.Key
 import software.amazon.awssdk.enhanced.dynamodb.model.QueryConditional
 
-private val dynamoDbClient = DynamoDbEnhancedClient.builder().build()
-
-class AssetRepository {
+object AssetRepository {
 
     private val table: DynamoDbTable<Asset> =
         dynamoDbClient.table(Asset::class.java.simpleName, DataClassTableSchema(Asset::class))

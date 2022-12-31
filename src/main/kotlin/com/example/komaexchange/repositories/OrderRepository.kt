@@ -1,10 +1,7 @@
 package com.example.komaexchange.repositories
 
 import com.example.komaexchange.entities.*
-import io.andrewohara.dynamokt.DataClassTableSchema
 import io.andrewohara.dynamokt.createTableWithIndices
-import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedClient
-import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable
 import software.amazon.awssdk.enhanced.dynamodb.Expression
 import software.amazon.awssdk.enhanced.dynamodb.Key
 import software.amazon.awssdk.enhanced.dynamodb.internal.AttributeValues
@@ -12,23 +9,7 @@ import software.amazon.awssdk.enhanced.dynamodb.model.QueryConditional
 import software.amazon.awssdk.enhanced.dynamodb.model.TransactUpdateItemEnhancedRequest
 import software.amazon.awssdk.enhanced.dynamodb.model.TransactWriteItemsEnhancedRequest
 
-private val dynamoDbClient = DynamoDbEnhancedClient.builder().build()
-
-private val orderTable: DynamoDbTable<Order> = dynamoDbClient.table(
-    Order::class.java.simpleName, DataClassTableSchema(Order::class)
-)
-
-private val tradeTable: DynamoDbTable<Trade> = dynamoDbClient.table(
-    Trade::class.java.simpleName, DataClassTableSchema(Trade::class)
-)
-
-private val assetTable: DynamoDbTable<Asset> = dynamoDbClient.table(
-    Asset::class.java.simpleName, DataClassTableSchema(Asset::class)
-)
-
-private val activeIndex = orderTable.index(Order.ActiveIndex);
-
-class OrderRepository {
+object OrderRepository {
     fun createTable() {
         orderTable.createTableWithIndices()
     }
