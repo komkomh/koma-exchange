@@ -5,7 +5,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-// TODO shard終了時の考慮を入れる
 class RecordQueue<T : Any> {
     private val mutex: Mutex = Mutex()
     private val queue = mutableListOf<Record<T>>()
