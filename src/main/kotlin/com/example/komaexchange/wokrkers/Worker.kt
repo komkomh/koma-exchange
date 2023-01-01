@@ -30,7 +30,11 @@ abstract class Worker<T : RecordEntity>(val shardMaster: ShardMaster) {
 
     abstract fun getTableSchema(): TableSchema<T>
 
-    abstract fun execute(record: Record<T>): QueueOrder
+    abstract fun recordInserted(entity: T): QueueOrder
+    abstract fun recordModified(entity: T): QueueOrder
+    abstract fun recordRemoved(entity: T): QueueOrder
+    abstract fun recordNone(): QueueOrder
+    abstract fun recordFinished(): QueueOrder
 
     fun start() {
         // 処理中、処理済みなら
@@ -70,6 +74,7 @@ abstract class Worker<T : RecordEntity>(val shardMaster: ShardMaster) {
             }
 
             ShardStatus.DONE -> {
+                queue.offer(Record.FINISHED) // シャードは終了している
                 return
             }
         }
@@ -137,7 +142,16 @@ abstract class Worker<T : RecordEntity>(val shardMaster: ShardMaster) {
                 QueueOrder.UNTIL_DONE -> queue.untilDone().peekWait()
                 QueueOrder.QUIT -> break
             }
-            queueOrder = execute(record)
+            queueOrder = when (record) {
+                is Record.INSERTED -> {
+                    record.t.sequenceNumber = record.sequenceNumber
+                    recordInserted(record.t)
+                }
+                is Record.MODIFIED -> recordModified(record.t)
+                is Record.REMOVED -> recordRemoved(record.t)
+                is Record.NONE -> recordNone()
+                is Record.FINISHED -> recordFinished()
+            }
         }
     }
 }

@@ -26,7 +26,7 @@ data class Order(
     val amount: BigDecimal, // 数量
     val remainingAmount: BigDecimal, // 残数量
     val tradeAction: TradeAction, // メイカーテイカー
-    override val sequenceNumber: String?, // 処理ID
+    override var sequenceNumber: String?, // 処理ID
     val updatedAt: Long, // 更新日時ms
     val createdAt: Long, // 作成日時ms
     val changeAmount: BigDecimal, // 変更数量
