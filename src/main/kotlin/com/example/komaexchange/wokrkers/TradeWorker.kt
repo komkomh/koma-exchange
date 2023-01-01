@@ -2,12 +2,9 @@ package com.example.komaexchange.wokrkers
 
 import com.example.komaexchange.entities.*
 import com.example.komaexchange.repositories.*
-import io.andrewohara.dynamokt.DataClassTableSchema
 import software.amazon.awssdk.enhanced.dynamodb.TableSchema
 import java.math.BigDecimal
 import java.util.*
-
-private val dataClassTableSchema = DataClassTableSchema(Order::class)
 
 class TradeWorker(shardMaster: ShardMaster) : Worker<Order>(shardMaster) {
     private var assetCache = mutableMapOf<Long, Asset>() // userIdで資産をキャッシュする
@@ -15,7 +12,6 @@ class TradeWorker(shardMaster: ShardMaster) : Worker<Order>(shardMaster) {
     private var tradeExecutor = TradeExecutor()
     override fun getTableSchema(): TableSchema<Order> {
         return orderTable.tableSchema()
-//        return orderTableSchema
     }
 
     // TODO 複数通過ペア対応
@@ -42,7 +38,7 @@ class TradeWorker(shardMaster: ShardMaster) : Worker<Order>(shardMaster) {
         }
 
         // 今回対象注文を約定する
-        tradeResult = when(tradeResult) {
+        tradeResult = when (tradeResult) {
             TradeResult.NOT_FULL -> tradeExecutor.trade(order)
             TradeResult.FULL -> TradeResult.FULL
         }
@@ -109,6 +105,7 @@ class TradeWorker(shardMaster: ShardMaster) : Worker<Order>(shardMaster) {
             tradeExecutor.resultItems.assets.map { Pair(assetCache[it.userId]!!, it) }.toSet(),
             newShardMaster,
         )
+
         when (result) {
             TransactionResult.SUCCESS -> { // トランザクションに成功すれば(約定後状態でキャッシュを上書く)
                 assetCache.putAll(tradeExecutor.assetMap) // 最新資産をマージする
@@ -116,6 +113,7 @@ class TradeWorker(shardMaster: ShardMaster) : Worker<Order>(shardMaster) {
                 activeOrderCache.addAll(tradeExecutor.orders) // 最新注文をマージする
                 tradeExecutor.resultItems.clear() // トランザクション項目をクリアする
             }
+
             TransactionResult.FAILURE -> { // トランザクションに失敗すれば(キャッシュで約定後状態を上書く)
                 tradeExecutor.init(assetCache, activeOrderCache) // やり直す
             }
@@ -162,21 +160,14 @@ data class TradeExecutor(
                     TradeResultItems(mutableSetOf(newOrder), mutableSetOf(), mutableSetOf(), maxItemCount)
                 }
 
-                else -> oneTrade(takerOrder, makerOrder) ?: break
+                else -> oneTrade(takerOrder, makerOrder) ?: return TradeResult.NOT_FULL
             }
 
-            when (resultItems.merge(newTradeResult)) {
-                true -> {
-                    resultItems.assets.forEach { assetMap.put(it.userId, it.copy()) }
-                    orders.removeAll(resultItems.orders)
-                    orders.addAll(resultItems.orders.filter { it.orderActive == OrderActive.ACTIVE }.toSet())
-                    takerOrder = newTradeResult.findTakerOrder() ?: break
-                }
-
+            when (merge(newTradeResult)) {
+                true -> takerOrder = newTradeResult.findTakerOrder() ?: return TradeResult.NOT_FULL
                 false -> return TradeResult.FULL
             }
         }
-        return TradeResult.NOT_FULL
     }
 
     // 約定させる
@@ -228,6 +219,25 @@ data class TradeExecutor(
             maxItemCount
         )
     }
+
+    private fun merge(newResultItems: TradeResultItems): Boolean {
+
+        if (resultItems.count(newResultItems) < maxItemCount) {
+            // 約定結果を更新する
+            resultItems.orders.removeAll(newResultItems.orders)
+            resultItems.orders.addAll(newResultItems.orders)
+            resultItems.trades.removeAll(newResultItems.trades)
+            resultItems.trades.addAll(newResultItems.trades)
+            resultItems.assets.removeAll(newResultItems.assets)
+            resultItems.assets.addAll(newResultItems.assets)
+            // 現在の約定実行のキャッシュを更新する
+            assetMap.putAll(resultItems.assets.map { it.userId to it.copy() })
+            orders.removeAll(resultItems.orders)
+            orders.addAll(resultItems.orders.filter { it.orderActive == OrderActive.ACTIVE }.map { it.copy() })
+            return true
+        }
+        return false
+    }
 }
 
 data class TradeResultItems(
@@ -242,27 +252,11 @@ data class TradeResultItems(
         assets.clear()
     }
 
-    private fun count(orderExecuteResult: TradeResultItems): Int {
+    fun count(orderExecuteResult: TradeResultItems): Int {
         val orderCount = orderExecuteResult.orders.count { !orders.contains(it) }
         val tradeCount = orderExecuteResult.trades.count { !trades.contains(it) }
         val assetCount = orderExecuteResult.assets.count { !assets.contains(it) }
         return assets.size + orders.size + trades.size + orderCount + tradeCount + assetCount
-    }
-
-    fun merge(orderExecuteResult: TradeResultItems): Boolean {
-        return when (count(orderExecuteResult) < maxItemCount) {
-            true -> {
-                orders.removeAll(orderExecuteResult.orders)
-                orders.addAll(orderExecuteResult.orders)
-                trades.removeAll(orderExecuteResult.trades)
-                trades.addAll(orderExecuteResult.trades)
-                assets.removeAll(orderExecuteResult.assets)
-                assets.addAll(orderExecuteResult.assets)
-                true
-            }
-
-            false -> false
-        }
     }
 
     fun findTakerOrder(): Order? {
