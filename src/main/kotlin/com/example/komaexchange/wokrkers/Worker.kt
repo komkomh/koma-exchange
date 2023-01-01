@@ -1,22 +1,23 @@
 package com.example.komaexchange.wokrkers
 
+import com.example.komaexchange.entities.Order
+import com.example.komaexchange.entities.RecordEntity
 import com.example.komaexchange.entities.ShardMaster
 import com.example.komaexchange.entities.ShardStatus
-import com.example.komaexchange.repositories.ShardMasterRepository
 import com.example.komaexchange.streamsClient
 import com.example.komaexchange.utils.RecordQueue
 import io.andrewohara.dynamokt.DataClassTableSchema
 import kotlinx.coroutines.*
+import software.amazon.awssdk.enhanced.dynamodb.TableSchema
 import software.amazon.awssdk.services.dynamodb.model.GetRecordsRequest
 import software.amazon.awssdk.services.dynamodb.model.GetShardIteratorRequest
 import software.amazon.awssdk.services.dynamodb.model.OperationType
 import software.amazon.awssdk.services.dynamodb.model.ShardIteratorType
 import kotlin.reflect.KClass
 
-abstract class Worker<T : Any>(val shardMaster: ShardMaster) {
+abstract class Worker<T : RecordEntity>(val shardMaster: ShardMaster) {
 
     val queue: RecordQueue<T> = RecordQueue()
-    private val tableSchema = DataClassTableSchema(getEntityClazz())
     var receiveJob: Job? = null
     var consumeJob: Job? = null
 
@@ -27,7 +28,7 @@ abstract class Worker<T : Any>(val shardMaster: ShardMaster) {
         }
     }
 
-    abstract fun getEntityClazz(): KClass<T>
+    abstract fun getTableSchema(): TableSchema<T>
 
     abstract fun execute(record: Record<T>): QueueOrder
 
@@ -89,17 +90,17 @@ abstract class Worker<T : Any>(val shardMaster: ShardMaster) {
                 when (record.eventName()!!) {
                     OperationType.INSERT -> Record.INSERTED(
                         record.dynamodb().sequenceNumber(),
-                        tableSchema.mapToItem(record.dynamodb().newImage())
+                        getTableSchema().mapToItem(record.dynamodb().newImage())
                     )
 
                     OperationType.MODIFY -> Record.MODIFIED(
                         record.dynamodb().sequenceNumber(),
-                        tableSchema.mapToItem(record.dynamodb().newImage())
+                        getTableSchema().mapToItem(record.dynamodb().newImage())
                     )
 
                     OperationType.REMOVE -> Record.REMOVED(
                         record.dynamodb().sequenceNumber(),
-                        tableSchema.mapToItem(record.dynamodb().oldImage())
+                        getTableSchema().mapToItem(record.dynamodb().oldImage())
                     )
 
                     OperationType.UNKNOWN_TO_SDK_VERSION -> throw RuntimeException("found UNKNOWN_TO_SDK_VERSION")
@@ -149,10 +150,10 @@ enum class QueueOrder {
     QUIT
 }
 
-sealed class Record<out T: Any>() {
-    data class INSERTED<out T: Any>(val sequenceNumber: String, val t: T) : Record<T>()
-    data class MODIFIED<out T: Any>(val sequenceNumber: String, val t: T) : Record<T>()
-    data class REMOVED<out T: Any>(val sequenceNumber: String, val t: T) : Record<T>()
+sealed class Record<out T : Any>() {
+    data class INSERTED<out T : Any>(val sequenceNumber: String, val t: T) : Record<T>()
+    data class MODIFIED<out T : Any>(val sequenceNumber: String, val t: T) : Record<T>()
+    data class REMOVED<out T : Any>(val sequenceNumber: String, val t: T) : Record<T>()
     object NONE : Record<Nothing>()
     object FINISHED : Record<Nothing>()
 }

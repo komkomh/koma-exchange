@@ -13,6 +13,9 @@ val dynamoDbClient: DynamoDbEnhancedClient = DynamoDbEnhancedClient.builder().bu
 val orderTable: DynamoDbTable<Order> = dynamoDbClient.table(
     Order::class.java.simpleName, DataClassTableSchema(Order::class)
 )
+val orderTableSchema = DataClassTableSchema(Order::class)
+
+
 val activeIndex = orderTable.index(Order.ActiveIndex)!!
 
 val tradeTable: DynamoDbTable<Trade> = dynamoDbClient.table(
@@ -26,3 +29,4 @@ val assetTable: DynamoDbTable<Asset> = dynamoDbClient.table(
 val shardMasterTable: DynamoDbTable<ShardMaster> = dynamoDbClient.table(
     ShardMaster::class.java.simpleName, DataClassTableSchema(ShardMaster::class)
 )
+

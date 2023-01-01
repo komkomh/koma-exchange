@@ -11,14 +11,20 @@ class RecordQueue<T : Any> {
     private var peekCount = 0
 
     suspend fun offer(t: Record<T>): Record<T> {
-        mutex.withLock { queue.add(t) }
+        mutex.withLock {
+            queue.add(t)
+        }
         return t
     }
 
     suspend fun peek(): Record<T> {
         mutex.withLock {
             return when (queue.size > peekCount) {
-                true -> queue[peekCount++]
+                true -> {
+                    val xx = queue[peekCount++]
+                    println("peek queue size = ${queue.size}, peedCount = ${peekCount}")
+                    xx
+                }
                 false -> Record.NONE
             }
         }

@@ -26,13 +26,13 @@ data class Order(
     val amount: BigDecimal, // 数量
     val remainingAmount: BigDecimal, // 残数量
     val tradeAction: TradeAction, // メイカーテイカー
-    val sequenceNumber: String?, // 処理ID
+    override val sequenceNumber: String?, // 処理ID
     val updatedAt: Long, // 更新日時ms
     val createdAt: Long, // 作成日時ms
     val changeAmount: BigDecimal, // 変更数量
     val actionRequest: ActionRequest, // 操作要求
     val actionResult: ActionResult, // 操作結果
-) : Comparable<Order> {
+) : RecordEntity(sequenceNumber), Comparable<Order> {
     companion object {
         const val ActiveIndex: String = "activeIndex"
     }

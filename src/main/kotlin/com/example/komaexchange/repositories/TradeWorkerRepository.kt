@@ -16,6 +16,7 @@ object TradeWorkerRepository {
         assets: Set<Pair<Asset, Asset>>,
         shardMaster: ShardMaster?,
     ): TransactionResult {
+        println("saveTransaction: size = ${orders.size + trades.size + assets.size}")
         val requestBuilder = TransactWriteItemsEnhancedRequest.builder()
         orders.forEach { requestBuilder.addPutItem(orderTable, it) }
         trades.forEach { requestBuilder.addPutItem(tradeTable, it) }

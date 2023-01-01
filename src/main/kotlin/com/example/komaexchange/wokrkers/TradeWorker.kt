@@ -1,21 +1,21 @@
 package com.example.komaexchange.wokrkers
 
 import com.example.komaexchange.entities.*
-import com.example.komaexchange.repositories.AssetRepository
-import com.example.komaexchange.repositories.OrderRepository
-import com.example.komaexchange.repositories.ShardMasterRepository
-import com.example.komaexchange.repositories.TradeWorkerRepository
+import com.example.komaexchange.repositories.*
+import io.andrewohara.dynamokt.DataClassTableSchema
+import software.amazon.awssdk.enhanced.dynamodb.TableSchema
 import java.math.BigDecimal
 import java.util.*
-import kotlin.reflect.KClass
 
+private val dataClassTableSchema = DataClassTableSchema(Order::class)
 
 class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(shardMaster) {
-    private var assetCache = mapOf<Long, Asset>() // userIdで資産をキャッシュする
-    private var activeOrderCache = setOf<Order>()
+    private var assetCache = mutableMapOf<Long, Asset>() // userIdで資産をキャッシュする
+    private var activeOrderCache = mutableSetOf<Order>()
     private var orderExecutor = OrderExecutor(maxCount = maxCount)
-    override fun getEntityClazz(): KClass<Order> {
-        return Order::class
+    override fun getTableSchema(): TableSchema<Order> {
+        return orderTable.tableSchema()
+//        return orderTableSchema
     }
 
     // TODO 複数通過ペア対応
@@ -44,11 +44,15 @@ class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(
     }
 
     fun insert(order: Order): QueueOrder {
+        println("${System.currentTimeMillis()} : insert1 ")
         // キャッシュが空なら
-        if (activeOrderCache.isEmpty()) {
+        if (assetCache.isEmpty() && activeOrderCache.isEmpty()) {
             // キャッシュを取得する
             activeOrderCache =
-                OrderRepository.findActive(order.currencyPair).filter { it.sequenceNumber != null }.toSet()
+                OrderRepository.findActive(order.currencyPair).filter { it.sequenceNumber != null }.toMutableSet()
+            if (assetCache[order.userId] == null) {
+                assetCache[order.userId] = AssetRepository.findOne(order.userId)
+            }
             // 約定実行を初期化する
             orderExecutor.init(assetCache, activeOrderCache)
         }
@@ -78,11 +82,14 @@ class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(
     }
 
     fun modify(order: Order): QueueOrder {
+        println("${System.currentTimeMillis()} : modify1 ")
         // TODO 実装
         return QueueOrder.CONTINUE
     }
 
     fun remove(order: Order): QueueOrder {
+        println("${System.currentTimeMillis()} : remove1 ")
+        orderExecutor.orders.removeIf { it.orderId == order.orderId }
         // TODO 実装
         return QueueOrder.CONTINUE
     }
@@ -94,6 +101,7 @@ class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(
 
         val newShardMaster = shardMaster.copy(
             sequenceNumber = orderExecutor.tradeResultValues.orders.map { it.sequenceNumber }.filterNotNull().max(),
+            shardStatus = ShardStatus.RUNNING,
             lockedMs = System.currentTimeMillis(),
         )
 
@@ -104,8 +112,9 @@ class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(
             newShardMaster,
         )
         if (result == TransactionResult.SUCCESS) {
-            assetCache = orderExecutor.assetMap // 最新資産をマージする
-            activeOrderCache = orderExecutor.orders // 最新注文をマージする
+            orderExecutor.assetMap.forEach { assetCache[it.key] = it.value.copy() } // 最新資産をマージする
+            activeOrderCache.clear()
+            orderExecutor.orders.forEach { activeOrderCache.add(it.copy()) } // 最新注文をマージする
         }
         orderExecutor.init(assetCache, activeOrderCache)
         return result
@@ -115,12 +124,11 @@ class TradeWorker(shardMaster: ShardMaster, maxCount: Int = 99) : Worker<Order>(
 data class OrderExecutor(
     val assetMap: MutableMap<Long, Asset> = mutableMapOf(),
     val orders: MutableSet<Order> = sortedSetOf(),
-    var tradeResultValues: TradeResultValues = TradeResultValues(setOf(), setOf(), setOf()),
+    var tradeResultValues: TradeResultValues = TradeResultValues(mutableSetOf(), mutableSetOf(), mutableSetOf()),
     val maxCount: Int,
 ) {
     fun trade(order: Order): TradeResult {
 
-        println("${System.currentTimeMillis()} : insert2 ")
         // TODO 大口個客が全喰いするかチェックする -> する場合はキャンセルとする
 
         var takerOrder = order
@@ -129,20 +137,30 @@ data class OrderExecutor(
                 .filter { it.tradeAction == TradeAction.MAKER }
                 .find { it.orderSide != takerOrder.orderSide }
             if (makerOrder == null) {
-                // takerをキャンセルする
-                this.tradeResultValues = tradeResultValues.merge(
-                    TradeResultValues(setOf(takerOrder.createCanceledOrder()), setOf(), setOf())
-                )
-                return TradeResult.NOT_FULL
+                val newOrder = when (takerOrder.orderType) {
+                    OrderType.MARKET, OrderType.POST_ONLY -> takerOrder.createCanceledOrder() // takerをキャンセルする
+                    OrderType.LIMIT -> takerOrder.copy(tradeAction = TradeAction.MAKER) // MAKERとする
+                }
+
+                val newTradeResult = TradeResultValues(mutableSetOf(newOrder), mutableSetOf(), mutableSetOf())
+                when (tradeResultValues.merge(newTradeResult)) {
+                    true -> {
+                        merge()
+                        break
+                    }
+
+                    false -> return TradeResult.FULL
+                }
             }
             val newTradeResult = oneTrade(takerOrder, makerOrder) ?: break
+            when (tradeResultValues.merge(newTradeResult)) {
+                true -> {
+                    merge()
+                    takerOrder = newTradeResult.findTakerOrder() ?: break
+                }
 
-            if (tradeResultValues.count(newTradeResult) > maxCount) {
-                return TradeResult.FULL
+                false -> return TradeResult.FULL
             }
-            this.tradeResultValues = tradeResultValues.merge(newTradeResult)
-            merge()
-            takerOrder = newTradeResult.findTakerOrder() ?: return TradeResult.NOT_FULL
         }
         return TradeResult.NOT_FULL
     }
@@ -152,7 +170,7 @@ data class OrderExecutor(
         assetCache.forEach { (userId, asset) -> assetMap[userId] = asset.copy() }
         orders.clear()
         orders.addAll(orderCache.map { it.copy() })
-        tradeResultValues = TradeResultValues(setOf(), setOf(), setOf())
+        tradeResultValues = TradeResultValues(mutableSetOf(), mutableSetOf(), mutableSetOf())
     }
 
     private fun cacheAndGetAsset(userId: Long): Asset {
@@ -163,7 +181,7 @@ data class OrderExecutor(
     }
 
     fun merge() {
-        tradeResultValues.assets.forEach { assetMap.plus(it.userId to it) }
+        tradeResultValues.assets.forEach { assetMap.put(it.userId, it.copy()) }
         orders.removeAll(tradeResultValues.orders)
         orders.addAll(tradeResultValues.orders.filter { it.orderActive == OrderActive.ACTIVE }.toSet())
     }
@@ -180,14 +198,14 @@ data class OrderExecutor(
         // 指値でクロスしていないければ
         if (takerOrder.orderType == OrderType.LIMIT && !takerOrder.orderSide.isCross(
                 takerOrder.price!!,
-                takerOrder.price
+                makerOrder.price!!
             )
         ) {
             // 何もしない TODO ちがう
             return null
         }
 
-        val takerAsset = cacheAndGetAsset(takerOrder.orderId)
+        val takerAsset = cacheAndGetAsset(takerOrder.userId)
         val makerAsset = cacheAndGetAsset(makerOrder.userId)
 
         // 対象数量
@@ -203,31 +221,39 @@ data class OrderExecutor(
         val takerTrade = takerOrder.createTrade(tradeAmount, makerOrder.price!!, makerOrder, makerTradeId)
         val makerTrade = makerOrder.createTrade(tradeAmount, makerOrder.price, takerOrder, takerTradeId)
         return TradeResultValues(
-            setOf(newTakerOrder, newMakerOrder),
-            setOf(takerTrade, makerTrade),
-            setOf(takerAsset, makerAsset)
+            mutableSetOf(newTakerOrder, newMakerOrder),
+            mutableSetOf(takerTrade, makerTrade),
+            mutableSetOf(takerAsset, makerAsset)
         )
     }
 }
 
 data class TradeResultValues(
-    val orders: Set<Order>,
-    val trades: Set<Trade>,
-    val assets: Set<Asset>,
+    val orders: MutableSet<Order>,
+    val trades: MutableSet<Trade>,
+    val assets: MutableSet<Asset>,
 ) {
-    fun count(orderExecuteResult: TradeResultValues): Int {
+    private fun count(orderExecuteResult: TradeResultValues): Int {
         val orderCount = orderExecuteResult.orders.count { !orders.contains(it) }
         val tradeCount = orderExecuteResult.trades.count { !trades.contains(it) }
         val assetCount = orderExecuteResult.assets.count { !assets.contains(it) }
         return assets.size + orders.size + trades.size + orderCount + tradeCount + assetCount
     }
 
-    fun merge(orderExecuteResult: TradeResultValues): TradeResultValues {
-        return TradeResultValues(
-            orders + orderExecuteResult.orders,
-            trades + orderExecuteResult.trades,
-            assets + orderExecuteResult.assets,
-        )
+    fun merge(orderExecuteResult: TradeResultValues): Boolean { // TODO マージ方法が悪い
+        return when (count(orderExecuteResult) < 100) {
+            true -> {
+                orders.removeAll(orderExecuteResult.orders)
+                orders.addAll(orderExecuteResult.orders)
+                trades.removeAll(orderExecuteResult.trades)
+                trades.addAll(orderExecuteResult.trades)
+                assets.removeAll(orderExecuteResult.assets)
+                assets.addAll(orderExecuteResult.assets)
+                true
+            }
+
+            false -> false
+        }
     }
 
     fun findTakerOrder(): Order? {

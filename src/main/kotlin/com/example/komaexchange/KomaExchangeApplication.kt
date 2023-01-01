@@ -11,13 +11,12 @@ class KomaExchangeApplication : ApplicationRunner {
     override fun run(args: ApplicationArguments?) {
         println("hello application runner!")
 
-        val receivers = listOf(
-            StreamReceiver()
-        )
+        val streamReceiver = StreamReceiver()
+        streamReceiver.init()
 
         while (true) {
-            receivers.forEach { it.execute() }
-            Thread.sleep(5000)
+            streamReceiver.execute()
+            Thread.sleep(10_000)
         }
     }
 }

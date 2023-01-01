@@ -39,7 +39,7 @@ fun two() {
         BigDecimal(1), // 数量
         BigDecimal(1), // 残数量
         TradeAction.TAKER, // メイカーテイカー
-        "", // 処理ID
+        null, // 処理ID
         System.currentTimeMillis(), // 更新日時ns
         System.currentTimeMillis(), // 作成日時ns
         BigDecimal.ZERO, // 変更数量
@@ -61,7 +61,7 @@ fun two() {
         BigDecimal(1), // 数量
         BigDecimal(1), // 残数量
         TradeAction.TAKER, // メイカーテイカー
-        "", // 処理ID
+        null, // 処理ID
         System.currentTimeMillis(), // 更新日時ms
         System.currentTimeMillis(), // 作成日時ms
         BigDecimal.ZERO, // 変更数量
@@ -73,7 +73,7 @@ fun two() {
 
 fun random() {
     println("hello!");
-    (0L..1000L).forEach {
+    (1L..1000L).forEach {
         val order = Order(
             CurrencyPair.BTC_JPY, // 通貨ペア
             it, // 注文ID
