@@ -120,8 +120,8 @@ abstract class Worker<T : RecordEntity>(val shardMaster: ShardMaster) {
                 false -> recordZeroCount = 0
             }
             if (recordZeroCount >= 3) {
-                // 1秒間停止する
-                delay(1000)
+                // 100ms間停止する
+                delay(100)
             }
 
             // 次のイテレータを設定する
