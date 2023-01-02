@@ -2,7 +2,11 @@ package com.example.komaexchange.wokrkers
 
 import com.example.komaexchange.entities.*
 import com.example.komaexchange.repositories.*
+import software.amazon.awssdk.enhanced.dynamodb.Expression
 import software.amazon.awssdk.enhanced.dynamodb.TableSchema
+import software.amazon.awssdk.enhanced.dynamodb.internal.AttributeValues
+import software.amazon.awssdk.enhanced.dynamodb.model.TransactUpdateItemEnhancedRequest
+import software.amazon.awssdk.enhanced.dynamodb.model.TransactWriteItemsEnhancedRequest
 import java.math.BigDecimal
 import java.util.*
 
@@ -16,7 +20,7 @@ class TradeWorker(shardMaster: ShardMaster) : Worker<Order>(shardMaster) {
 
     // TODO 複数通過ペア対応
     // レコードが挿入されたことを検出した
-    override fun recordInserted(order: Order): QueueOrder {
+    override fun recordInserted(order: Order): Transaction {
         println("${System.currentTimeMillis()} : insert1 ")
         // キャッシュが空なら
         if (assetCache.isEmpty() && activeOrderCache.isEmpty()) {
@@ -44,81 +48,79 @@ class TradeWorker(shardMaster: ShardMaster) : Worker<Order>(shardMaster) {
         }
 
         return when (tradeResult) {
-            TradeResult.NOT_FULL -> QueueOrder.CONTINUE // 一括更新アイテム数に余裕があるため次の注文を取得する
-            TradeResult.FULL -> { // 一括更新アイテム数いっぱいになれば
-                when (saveAndMerge()) { // DBに反映する
-                    TransactionResult.SUCCESS -> QueueOrder.UNTIL_DONE // 反映成功 -> 前回分までを確定する
-                    TransactionResult.FAILURE -> QueueOrder.RESET // 反映失敗 -> 再送を依頼する
-                }
-            }
+            TradeResult.NOT_FULL -> Transaction(QueueOrder.CONTINUE) // 一括更新アイテム数に余裕があるため次の注文を取得する
+            TradeResult.FULL -> createTransaction(QueueOrder.UNTIL_DONE) // 一括更新アイテム数いっぱいになれば更新する
         }
     }
 
     // レコードが更新されたことを検出した
-    override fun recordModified(order: Order): QueueOrder {
+    override fun recordModified(order: Order): Transaction {
         println("${System.currentTimeMillis()} : modify1 ")
         // TODO 実装
-        return QueueOrder.CONTINUE
+        return Transaction(QueueOrder.CONTINUE)
     }
 
     // レコードが削除されたことを検出した
-    override fun recordRemoved(order: Order): QueueOrder {
+    override fun recordRemoved(order: Order): Transaction {
         println("${System.currentTimeMillis()} : remove1 ")
         // 注文が削除されることは本来ありえない
-        tradeExecutor.orders.removeIf { it.orderId == order.orderId }
-        return QueueOrder.CONTINUE
+        tradeExecutor.orders.remove(order)
+        return createTransaction(QueueOrder.CONTINUE)
     }
 
     // レコードへの操作が検出されなかった
-    override fun recordNone(): QueueOrder {
-        return when (saveAndMerge()) {
-            TransactionResult.SUCCESS -> QueueOrder.DONE // これまで分を確定する
-            TransactionResult.FAILURE -> QueueOrder.RESET // 注文再送を依頼する
-        }
+    override fun recordNone(): Transaction {
+        return createTransaction(QueueOrder.DONE)
     }
 
     // シャード受信の終了が検出された(このworkerも終わる)
-    override fun recordFinished(): QueueOrder {
-        return when (saveAndMerge()) {
-            TransactionResult.SUCCESS -> {
-                ShardMasterRepository.save(shardMaster.createDone())
-                QueueOrder.QUIT
-            } // これまで分を確定する
-            TransactionResult.FAILURE -> QueueOrder.RESET // 注文再送を依頼する
-        }
+    override fun recordFinished(): Transaction {
+        // TODO どうするか
+        // ShardMasterRepository.save(shardMaster.createDone())
+        return createTransaction(QueueOrder.QUIT)
     }
 
-    fun saveAndMerge(): TransactionResult {
-        if (!tradeExecutor.resultItems.hasValue()) {
-            return TransactionResult.SUCCESS
+    private fun createTransaction(queueOrder: QueueOrder): Transaction {
+        println("saveTransaction: size = ${tradeExecutor.resultItems.orders.size + tradeExecutor.resultItems.trades.size + tradeExecutor.resultItems.assets.size}")
+        val requestBuilder = TransactWriteItemsEnhancedRequest.builder()
+        tradeExecutor.resultItems.orders.forEach { requestBuilder.addPutItem(orderTable, it) }
+        tradeExecutor.resultItems.trades.forEach { requestBuilder.addPutItem(tradeTable, it) }
+        tradeExecutor.resultItems.assets.forEach {
+            val oldAsset = assetCache[it.userId]!!
+            // 資産が変更されていればrollback
+            requestBuilder.addUpdateItem(
+                assetTable, TransactUpdateItemEnhancedRequest.builder(Asset::class.java)
+                    .conditionExpression(
+                        Expression.builder()
+                            .expression("#updatedAt = :updatedAt")
+                            .putExpressionName("#updatedAt", "updatedAt")
+                            .putExpressionValue(":updatedAt", AttributeValues.numberValue(oldAsset.updatedAt))
+                            .build()
+                    )
+                    .item(it)
+                    .build()
+            )
         }
-
-        val newShardMaster = shardMaster.copy(
-            sequenceNumber = tradeExecutor.resultItems.orders.map { it.sequenceNumber }.filterNotNull().max(),
-            shardStatus = ShardStatus.RUNNING,
-            lockedMs = System.currentTimeMillis(),
-        )
-
-        val result = TradeWorkerRepository.saveTransaction(
-            tradeExecutor.resultItems.orders,
-            tradeExecutor.resultItems.trades,
-            tradeExecutor.resultItems.assets.map { Pair(assetCache[it.userId]!!, it) }.toSet(),
-            newShardMaster,
-        )
-
-        when (result) {
-            TransactionResult.SUCCESS -> { // トランザクションに成功すれば(約定後状態でキャッシュを上書く)
-                assetCache.putAll(tradeExecutor.assetMap) // 最新資産をマージする
+        return Transaction(
+            queueOrder = queueOrder,
+            builder = requestBuilder,
+            successFun = {
+                // 約定後の資産をマージする
+                assetCache.putAll(tradeExecutor.assetMap)
+                // 約定後の注文をマージする
                 activeOrderCache.clear()
-                activeOrderCache.addAll(tradeExecutor.orders) // 最新注文をマージする
-                tradeExecutor.resultItems.clear() // トランザクション項目をクリアする
+                activeOrderCache.addAll(tradeExecutor.orders)
+                // 約定結果をクリアする
+                tradeExecutor.resultItems.clear()
+            },
+            failureFun = {
+                // 資産を取り直す
+                val assets = AssetRepository.find(tradeExecutor.assetMap.keys)
+                assetCache.putAll(assets.map { it.userId to it })
+                // 約定実行を初期化する
+                tradeExecutor.init(assetCache, activeOrderCache)
             }
-
-            TransactionResult.FAILURE -> { // トランザクションに失敗すれば(キャッシュで約定後状態を上書く)
-                tradeExecutor.init(assetCache, activeOrderCache) // やり直す
-            }
-        }
-        return result
+        )
     }
 }
 
@@ -132,15 +134,19 @@ data class TradeExecutor(
 ) {
     // 初期化する
     fun init(assetCache: Map<Long, Asset>, orderCache: Set<Order>) {
-        // 各要素をクリアする
+        // 資産を初期化する
         assetMap.clear()
-        orders.clear()
-        resultItems.clear()
-        // ディープコピーする
         assetMap.putAll(assetCache.map { it.key to it.value.copy() })
+
+        // 注文を初期化する
+        orders.clear()
         orders.addAll(orderCache.map { it.copy() })
+
+        // 約定結果をクリアする
+        resultItems.clear()
     }
 
+    // 約定
     fun trade(order: Order): TradeResult {
 
         // TODO 大口個客が全喰いするかチェックする -> する場合はキャンセルとする
@@ -151,32 +157,24 @@ data class TradeExecutor(
                 .filter { it.tradeAction == TradeAction.MAKER }
                 .find { it.orderSide != takerOrder.orderSide }
 
-            val newTradeResult = when (makerOrder) {
-                null -> {
-                    val newOrder = when (takerOrder.orderType) {
-                        OrderType.MARKET, OrderType.POST_ONLY -> takerOrder.createCanceledOrder() // TAKERをキャンセルする
-                        OrderType.LIMIT -> takerOrder.copy(tradeAction = TradeAction.MAKER) // MAKERとする
-                    }
-                    TradeResultItems(mutableSetOf(newOrder), mutableSetOf(), mutableSetOf(), maxItemCount)
-                }
-
-                else -> oneTrade(takerOrder, makerOrder) ?: return TradeResult.NOT_FULL
-            }
-
-            when (merge(newTradeResult)) {
-                true -> takerOrder = newTradeResult.findTakerOrder() ?: return TradeResult.NOT_FULL
+            val tradeResult = oneTrade(takerOrder, makerOrder)
+            when (merge(tradeResult)) {
+                true -> takerOrder = tradeResult.findTakerOrder() ?: return TradeResult.NOT_FULL
                 false -> return TradeResult.FULL
             }
         }
     }
 
     // 約定させる
-    private fun oneTrade(takerOrder: Order, makerOrder: Order): TradeResultItems? {
+    private fun oneTrade(takerOrder: Order, makerOrder: Order?): TradeResultItems {
 
-        // 残数量がなければ
-        if (takerOrder.remainingAmount <= BigDecimal.ZERO) {
-            // 何もしない
-            return null
+        // MAKERがなければ
+        if (makerOrder == null) {
+            val newOrder = when (takerOrder.orderType) {
+                OrderType.MARKET, OrderType.POST_ONLY -> takerOrder.createCanceledOrder() // TAKERをキャンセルする
+                OrderType.LIMIT -> takerOrder.copy(tradeAction = TradeAction.MAKER) // MAKERとする
+            }
+            return TradeResultItems(mutableSetOf(newOrder), mutableSetOf(), mutableSetOf(), maxItemCount)
         }
 
         // 指値でクロスしていないければ
@@ -185,8 +183,9 @@ data class TradeExecutor(
                 makerOrder.price!!
             )
         ) {
-            // 何もしない TODO ちがう
-            return null
+            // MAKERとする
+            val newOrder = takerOrder.copy(tradeAction = TradeAction.MAKER)
+            return TradeResultItems(mutableSetOf(newOrder), mutableSetOf(), mutableSetOf(), maxItemCount)
         }
 
         // 対象数量
@@ -238,6 +237,7 @@ data class TradeExecutor(
         }
         return false
     }
+
 }
 
 data class TradeResultItems(

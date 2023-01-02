@@ -1,6 +1,9 @@
 package com.example.komaexchange.repositories
 
 import com.example.komaexchange.entities.*
+import com.example.komaexchange.wokrkers.QueueOrder
+import io.andrewohara.dynamokt.DataClassTableSchema
+import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable
 import software.amazon.awssdk.enhanced.dynamodb.Expression
 import software.amazon.awssdk.enhanced.dynamodb.internal.AttributeValues
 import software.amazon.awssdk.enhanced.dynamodb.model.TransactUpdateItemEnhancedRequest
@@ -11,30 +14,11 @@ import software.amazon.awssdk.services.dynamodb.model.TransactionCanceledExcepti
 object WorkerRepository {
 
     fun saveTransaction(
-        orders: Set<Order>,
-        trades: Set<Trade>,
-        assets: Set<Pair<Asset, Asset>>,
-        shardMaster: ShardMaster?,
+        transaction: Transaction,
+        shardMaster: ShardMaster,
     ): TransactionResult {
-        println("saveTransaction: size = ${orders.size + trades.size + assets.size}")
-        val requestBuilder = TransactWriteItemsEnhancedRequest.builder()
-        orders.forEach { requestBuilder.addPutItem(orderTable, it) }
-        trades.forEach { requestBuilder.addPutItem(tradeTable, it) }
-        assets.forEach {
-            // 資産が変更されていればrollback
-            requestBuilder.addUpdateItem(
-                assetTable, TransactUpdateItemEnhancedRequest.builder(Asset::class.java)
-                    .conditionExpression(
-                        Expression.builder()
-                            .expression("#updatedAt = :updatedAt")
-                            .putExpressionName("#updatedAt", "updatedAt")
-                            .putExpressionValue(":updatedAt", AttributeValues.numberValue(it.first.updatedAt))
-                            .build()
-                    )
-                    .item(it.second)
-                    .build()
-            )
-        }
+
+        val requestBuilder = transaction.builder
 
 //        // Shard：sequenceNumberが更新されていればrollback TODO
 //        requestBuilder.addUpdateItem(
@@ -52,8 +36,11 @@ object WorkerRepository {
 //                .item(shardMaster.second)
 //                .build()
 //        )
-        if (shardMaster != null) {
-            requestBuilder.addPutItem(shardMasterTable, shardMaster)
+        requestBuilder.addPutItem(shardMasterTable, shardMaster)
+
+        val request = requestBuilder.build()
+        if (request.transactWriteItems().size <= 1) {
+            return TransactionResult.SUCCESS
         }
 
         return try {
@@ -67,4 +54,12 @@ object WorkerRepository {
     data class TransactionData(val items: RecordEntity) {
 
     }
+}
+
+data class Transaction(
+    val queueOrder: QueueOrder,
+    val builder: TransactWriteItemsEnhancedRequest.Builder = TransactWriteItemsEnhancedRequest.builder(),
+    val successFun: () -> Unit = {},
+    val failureFun: () -> Unit = {},
+) {
 }

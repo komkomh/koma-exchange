@@ -1,19 +1,19 @@
 package com.example.komaexchange.wokrkers
 
-import com.example.komaexchange.entities.Order
 import com.example.komaexchange.entities.RecordEntity
 import com.example.komaexchange.entities.ShardMaster
 import com.example.komaexchange.entities.ShardStatus
+import com.example.komaexchange.entities.TransactionResult
+import com.example.komaexchange.repositories.Transaction
+import com.example.komaexchange.repositories.WorkerRepository
 import com.example.komaexchange.streamsClient
 import com.example.komaexchange.utils.RecordQueue
-import io.andrewohara.dynamokt.DataClassTableSchema
 import kotlinx.coroutines.*
 import software.amazon.awssdk.enhanced.dynamodb.TableSchema
 import software.amazon.awssdk.services.dynamodb.model.GetRecordsRequest
 import software.amazon.awssdk.services.dynamodb.model.GetShardIteratorRequest
 import software.amazon.awssdk.services.dynamodb.model.OperationType
 import software.amazon.awssdk.services.dynamodb.model.ShardIteratorType
-import kotlin.reflect.KClass
 
 abstract class Worker<T : RecordEntity>(val shardMaster: ShardMaster) {
 
@@ -30,11 +30,11 @@ abstract class Worker<T : RecordEntity>(val shardMaster: ShardMaster) {
 
     abstract fun getTableSchema(): TableSchema<T>
 
-    abstract fun recordInserted(entity: T): QueueOrder
-    abstract fun recordModified(entity: T): QueueOrder
-    abstract fun recordRemoved(entity: T): QueueOrder
-    abstract fun recordNone(): QueueOrder
-    abstract fun recordFinished(): QueueOrder
+    abstract fun recordInserted(entity: T): Transaction
+    abstract fun recordModified(entity: T): Transaction
+    abstract fun recordRemoved(entity: T): Transaction
+    abstract fun recordNone(): Transaction
+    abstract fun recordFinished(): Transaction
 
     fun start() {
         // 処理中、処理済みなら
@@ -142,15 +142,20 @@ abstract class Worker<T : RecordEntity>(val shardMaster: ShardMaster) {
                 QueueOrder.UNTIL_DONE -> queue.untilDone().peekWait()
                 QueueOrder.QUIT -> break
             }
-            queueOrder = when (record) {
+            val transaction = when (record) {
                 is Record.INSERTED -> {
                     record.t.sequenceNumber = record.sequenceNumber
                     recordInserted(record.t)
                 }
+
                 is Record.MODIFIED -> recordModified(record.t)
                 is Record.REMOVED -> recordRemoved(record.t)
                 is Record.NONE -> recordNone()
                 is Record.FINISHED -> recordFinished()
+            }
+            queueOrder = when (WorkerRepository.saveTransaction(transaction, shardMaster)) {
+                TransactionResult.SUCCESS -> transaction.successQueueOrder
+                TransactionResult.FAILURE -> transaction.failureQueueOrder
             }
         }
     }
@@ -171,6 +176,5 @@ sealed class Record<out T : Any>() {
     object NONE : Record<Nothing>()
     object FINISHED : Record<Nothing>()
 }
-
 
 

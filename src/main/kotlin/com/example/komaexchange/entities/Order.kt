@@ -78,7 +78,6 @@ data class Order(
         return this.copy(
             orderActive = orderStatus.orderActive,
             orderStatus = orderStatus,
-            tradeAction = TradeAction.MAKER,
             updatedAt = System.currentTimeMillis(),
             actionRequest = ActionRequest.NONE,
             actionResult = ActionResult.ORDER_SUCCEEDED,

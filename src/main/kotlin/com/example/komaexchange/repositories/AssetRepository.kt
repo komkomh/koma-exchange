@@ -3,22 +3,21 @@ package com.example.komaexchange.repositories
 import com.example.komaexchange.entities.Asset
 import com.example.komaexchange.entities.CurrencyPair
 import io.andrewohara.dynamokt.DataClassTableSchema
-import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedClient
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable
 import software.amazon.awssdk.enhanced.dynamodb.Key
+import software.amazon.awssdk.enhanced.dynamodb.model.BatchGetItemEnhancedRequest
+import software.amazon.awssdk.enhanced.dynamodb.model.GetItemEnhancedRequest
 import software.amazon.awssdk.enhanced.dynamodb.model.QueryConditional
+import software.amazon.awssdk.enhanced.dynamodb.model.ReadBatch
 
 object AssetRepository {
 
-    private val table: DynamoDbTable<Asset> =
-        dynamoDbClient.table(Asset::class.java.simpleName, DataClassTableSchema(Asset::class))
-
     fun createTable() {
-        table.createTable();
+        assetTable.createTable();
     }
 
     fun save(asset: Asset) {
-        table.putItem(asset)
+        assetTable.putItem(asset)
     }
 
     fun findOne(userId: Long): Asset {
@@ -26,7 +25,18 @@ object AssetRepository {
             .builder()
             .partitionValue(userId)
             .build()
-        return table.getItem(key)
+        return assetTable.getItem(key)
+    }
+
+    fun find(userIds: Set<Long>): Set<Asset> {
+        val readBatches = userIds
+            .map { Key.builder().partitionValue(it).build() }
+            .map { GetItemEnhancedRequest.builder().key(it).build() }
+            .map { ReadBatch.builder(Asset::class.java).addGetItem(it).build() }
+
+        val request = BatchGetItemEnhancedRequest.builder().readBatches(readBatches).build()
+        return dynamoDbClient.batchGetItem(request).flatMap { it.resultsForTable(assetTable) }.toSet()
+
     }
 
     fun list(currencyPair: CurrencyPair): List<Asset> {
@@ -35,6 +45,6 @@ object AssetRepository {
             .builder()
             .partitionValue(currencyPair.name)
             .build()
-        return table.query(QueryConditional.keyEqualTo(key)).items().toList()
+        return assetTable.query(QueryConditional.keyEqualTo(key)).items().toList()
     }
 }
