@@ -185,24 +185,24 @@ enum class QueueOrder { CONTINUE, DONE, UNTIL_DONE, RESET, QUIT }
 
 sealed class Record<out T : RecordEntity>() {
     data class INSERTED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>() {
-        override fun getSequenceNumber(): String? = t.sequenceNumber
+        override fun currentSequenceNumber(): String? = t.sequenceNumber
     }
 
     data class MODIFIED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>() {
-        override fun getSequenceNumber(): String? = t.sequenceNumber
+        override fun currentSequenceNumber(): String? = t.sequenceNumber
     }
 
     data class REMOVED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>() {
-        override fun getSequenceNumber(): String? = t.sequenceNumber
+        override fun currentSequenceNumber(): String? = t.sequenceNumber
     }
 
     object NONE : Record<Nothing>() {
-        override fun getSequenceNumber(): String? = null
+        override fun currentSequenceNumber(): String? = null
     }
 
     object FINISHED : Record<Nothing>() {
-        override fun getSequenceNumber(): String? = null
+        override fun currentSequenceNumber(): String? = null
     }
 
-    abstract fun getSequenceNumber(): String?
+    abstract fun currentSequenceNumber(): String?
 }

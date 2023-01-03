@@ -39,7 +39,7 @@ class RecordQueue<T : RecordEntity> {
         mutex.withLock {
             lastSequenceNumber = when (peekCount < 1) {
                 true -> null
-                false -> recordList[peekCount - 1].getSequenceNumber()
+                false -> recordList[peekCount - 1].currentSequenceNumber()
             }
             (1..peekCount).forEach { _ -> recordList.removeAt(0) }
             peekCount = 0
@@ -51,7 +51,7 @@ class RecordQueue<T : RecordEntity> {
         mutex.withLock {
             lastSequenceNumber = when (peekCount < 2) {
                 true -> null
-                false -> recordList[peekCount - 2].getSequenceNumber()
+                false -> recordList[peekCount - 2].currentSequenceNumber()
             }
             (1 until peekCount).forEach { _ -> recordList.removeAt(0) }
             peekCount = 0
