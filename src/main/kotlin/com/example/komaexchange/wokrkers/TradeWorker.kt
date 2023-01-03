@@ -62,9 +62,9 @@ class TradeWorker(shardMaster: ShardMaster) : Worker<Order>(shardMaster) {
     // レコードが削除されたことを検出した
     override fun recordRemoved(order: Order): Transaction {
         println("${System.currentTimeMillis()} : remove1 ")
-        // 注文が削除されることは本来ありえない
-        tradeExecutor.orders.remove(order)
-        return createTransaction(QueueOrder.CONTINUE)
+        // Activeな注文が削除されることはありえない
+        tradeExecutor.orders.removeIf { it.orderId == order.orderId}
+        return Transaction(QueueOrder.CONTINUE)
     }
 
     // レコードへの操作が検出されなかった
@@ -79,10 +79,14 @@ class TradeWorker(shardMaster: ShardMaster) : Worker<Order>(shardMaster) {
 
     private fun createTransaction(queueOrder: QueueOrder): Transaction {
         println("saveTransaction: size = ${tradeExecutor.tradeResultItems.orders.size + tradeExecutor.tradeResultItems.trades.size + tradeExecutor.tradeResultItems.assets.size}")
+
+        val items = tradeExecutor.tradeResultItems
         val requestBuilder = TransactWriteItemsEnhancedRequest.builder()
-        tradeExecutor.tradeResultItems.orders.forEach { requestBuilder.addPutItem(orderTable, it) }
-        tradeExecutor.tradeResultItems.trades.forEach { requestBuilder.addPutItem(tradeTable, it) }
-        tradeExecutor.tradeResultItems.assets.forEach {
+        items.orders.forEach { requestBuilder.addPutItem(orderTable, it) }
+        items.trades.forEach { requestBuilder.addPutItem(tradeTable, it) }
+        items.assets
+            .filter {asset -> items.orders.find { it.userId == asset.userId } != null }
+            .forEach {
             val oldAsset = assetCache[it.userId]!!
             // 資産が変更されていればrollback
             requestBuilder.addUpdateItem(

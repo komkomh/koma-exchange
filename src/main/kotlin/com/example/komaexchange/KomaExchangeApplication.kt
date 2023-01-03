@@ -1,6 +1,5 @@
 package com.example.komaexchange
 
-import com.example.komaexchange.wokrkers.TradeWorker
 import org.springframework.boot.ApplicationArguments
 import org.springframework.boot.ApplicationRunner
 import org.springframework.boot.autoconfigure.SpringBootApplication

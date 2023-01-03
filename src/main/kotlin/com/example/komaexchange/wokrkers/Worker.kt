@@ -159,23 +159,34 @@ abstract class Worker<T : RecordEntity>(var shardMaster: ShardMaster) {
                 is Record.FINISHED -> recordFinished()
             }
             // 最後のシーケンスNoを取得する
-            val sequenceNumber = when (queue.lastSequenceNumber) {
-                null -> shardMaster.sequenceNumber
-                else -> queue.lastSequenceNumber
+            val lastSequenceNumber = when (transaction.queueOrder) {
+                QueueOrder.DONE, QueueOrder.QUIT -> queue.ifDoneLastSequenceNumber()
+                QueueOrder.UNTIL_DONE -> queue.ifUntilDoneLastSequenceNumber()
+                QueueOrder.CONTINUE, QueueOrder.RESET -> null
             }
+            val sequenceNumber = when (lastSequenceNumber) {
+                null -> shardMaster.sequenceNumber
+                else -> lastSequenceNumber
+            }
+
             // 新規シャードを生成する
             val newShardMaster = shardMaster.copy(
                 sequenceNumber = sequenceNumber,
-                lockedMs = System.currentTimeMillis()
+                shardStatus = ShardStatus.RUNNING,
+                lockedMs = System.currentTimeMillis(),
             )
             // トランザクションを実行し次のQueue操作を取得する
             queueOrder = when (WorkerRepository.saveTransaction(transaction, shardMaster, newShardMaster)) {
                 TransactionResult.SUCCESS -> {
+                    transaction.successFun()
                     this.shardMaster = newShardMaster // シャードを置き換える
                     transaction.queueOrder
                 }
 
-                TransactionResult.FAILURE -> QueueOrder.RESET // 失敗すれば無かったことにする
+                TransactionResult.FAILURE -> { // 失敗すれば
+                    transaction.failureFun()
+                    QueueOrder.RESET // 無かったことにする
+                }
             }
         }
     }
@@ -183,26 +194,26 @@ abstract class Worker<T : RecordEntity>(var shardMaster: ShardMaster) {
 
 enum class QueueOrder { CONTINUE, DONE, UNTIL_DONE, RESET, QUIT }
 
-sealed class Record<out T : RecordEntity>() {
-    data class INSERTED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>() {
-        override fun currentSequenceNumber(): String? = t.sequenceNumber
+sealed class Record<out T : RecordEntity>(val currentSequenceNumber: String? = null) {
+    data class INSERTED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>(sequenceNumber) {
+//        override fun currentSequenceNumber(): String? = t.sequenceNumber
     }
 
-    data class MODIFIED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>() {
-        override fun currentSequenceNumber(): String? = t.sequenceNumber
+    data class MODIFIED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>(sequenceNumber) {
+//        override fun currentSequenceNumber(): String? = t.sequenceNumber
     }
 
-    data class REMOVED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>() {
-        override fun currentSequenceNumber(): String? = t.sequenceNumber
+    data class REMOVED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>(sequenceNumber) {
+//        override fun currentSequenceNumber(): String? = t.sequenceNumber
     }
 
     object NONE : Record<Nothing>() {
-        override fun currentSequenceNumber(): String? = null
+//        override fun currentSequenceNumber(): String? = null
     }
 
     object FINISHED : Record<Nothing>() {
-        override fun currentSequenceNumber(): String? = null
+//        override fun currentSequenceNumber(): String? = null
     }
-
-    abstract fun currentSequenceNumber(): String?
+//
+//    abstract fun currentSequenceNumber(): String?
 }

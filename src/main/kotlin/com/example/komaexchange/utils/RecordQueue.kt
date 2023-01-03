@@ -10,7 +10,6 @@ class RecordQueue<T : RecordEntity> {
     private val mutex: Mutex = Mutex()
     private val recordList = mutableListOf<Record<T>>()
     private var peekCount = 0
-    var lastSequenceNumber: String? = null
 
     suspend fun offer(t: Record<T>): Record<T> {
         mutex.withLock { recordList.add(t) }
@@ -37,10 +36,6 @@ class RecordQueue<T : RecordEntity> {
 
     suspend fun done(): RecordQueue<T> {
         mutex.withLock {
-            lastSequenceNumber = when (peekCount < 1) {
-                true -> null
-                false -> recordList[peekCount - 1].currentSequenceNumber()
-            }
             (1..peekCount).forEach { _ -> recordList.removeAt(0) }
             peekCount = 0
         }
@@ -49,10 +44,6 @@ class RecordQueue<T : RecordEntity> {
 
     suspend fun untilDone(): RecordQueue<T> {
         mutex.withLock {
-            lastSequenceNumber = when (peekCount < 2) {
-                true -> null
-                false -> recordList[peekCount - 2].currentSequenceNumber()
-            }
             (1 until peekCount).forEach { _ -> recordList.removeAt(0) }
             peekCount = 0
         }
@@ -60,14 +51,29 @@ class RecordQueue<T : RecordEntity> {
     }
 
     suspend fun reset(): RecordQueue<T> {
-        mutex.withLock {
-            lastSequenceNumber = null
-            peekCount = 0
-        }
+        mutex.withLock { peekCount = 0 }
         return this
     }
 
     suspend fun size(): Int {
         return mutex.withLock { recordList.size }
+    }
+
+    suspend fun ifDoneLastSequenceNumber(): String? {
+        return mutex.withLock {
+            when (peekCount < 1) {
+                true -> null
+                false -> recordList[peekCount - 1].currentSequenceNumber
+            }
+        }
+    }
+
+    suspend fun ifUntilDoneLastSequenceNumber(): String? {
+        return mutex.withLock {
+            when (peekCount < 2) {
+                true -> null
+                false -> recordList[peekCount - 2].currentSequenceNumber
+            }
+        }
     }
 }

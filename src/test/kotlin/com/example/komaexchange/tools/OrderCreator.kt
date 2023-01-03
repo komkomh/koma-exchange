@@ -9,8 +9,8 @@ import java.math.BigDecimal
 fun main() {
     println("order create!");
 //    createAsset()
-//    two()
-    random()
+    two()
+//    random()
 }
 
 fun createAsset() {
