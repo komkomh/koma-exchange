@@ -4,6 +4,7 @@ import com.example.komaexchange.entities.RecordEntity
 import com.example.komaexchange.entities.ShardMaster
 import com.example.komaexchange.entities.ShardStatus
 import com.example.komaexchange.entities.TransactionResult
+import com.example.komaexchange.repositories.ShardMasterRepository
 import com.example.komaexchange.repositories.Transaction
 import com.example.komaexchange.repositories.WorkerRepository
 import com.example.komaexchange.streamsClient
@@ -15,7 +16,7 @@ import software.amazon.awssdk.services.dynamodb.model.GetShardIteratorRequest
 import software.amazon.awssdk.services.dynamodb.model.OperationType
 import software.amazon.awssdk.services.dynamodb.model.ShardIteratorType
 
-abstract class Worker<T : RecordEntity>(val shardMaster: ShardMaster) {
+abstract class Worker<T : RecordEntity>(var shardMaster: ShardMaster) {
 
     val queue: RecordQueue<T> = RecordQueue()
     var receiveJob: Job? = null
@@ -133,15 +134,19 @@ abstract class Worker<T : RecordEntity>(val shardMaster: ShardMaster) {
     }
 
     suspend fun consumeQueue() {
-        var queueOrder = QueueOrder.DONE
+        var queueOrder = QueueOrder.RESET
         while (true) {
             val record = when (queueOrder) {
                 QueueOrder.CONTINUE -> queue.peek()
                 QueueOrder.DONE -> queue.done().peekWait()
                 QueueOrder.RESET -> queue.reset().peekWait()
                 QueueOrder.UNTIL_DONE -> queue.untilDone().peekWait()
-                QueueOrder.QUIT -> break
+                QueueOrder.QUIT -> {
+                    ShardMasterRepository.save(shardMaster.createDone())
+                    break
+                }
             }
+            // トランザクションを取得する
             val transaction = when (record) {
                 is Record.INSERTED -> {
                     record.t.sequenceNumber = record.sequenceNumber
@@ -153,28 +158,51 @@ abstract class Worker<T : RecordEntity>(val shardMaster: ShardMaster) {
                 is Record.NONE -> recordNone()
                 is Record.FINISHED -> recordFinished()
             }
-            queueOrder = when (WorkerRepository.saveTransaction(transaction, shardMaster)) {
-                TransactionResult.SUCCESS -> transaction.successQueueOrder
-                TransactionResult.FAILURE -> transaction.failureQueueOrder
+            // 最後のシーケンスNoを取得する
+            val sequenceNumber = when (queue.lastSequenceNumber) {
+                null -> shardMaster.sequenceNumber
+                else -> queue.lastSequenceNumber
+            }
+            // 新規シャードを生成する
+            val newShardMaster = shardMaster.copy(
+                sequenceNumber = sequenceNumber,
+                lockedMs = System.currentTimeMillis()
+            )
+            // トランザクションを実行し次のQueue操作を取得する
+            queueOrder = when (WorkerRepository.saveTransaction(transaction, shardMaster, newShardMaster)) {
+                TransactionResult.SUCCESS -> {
+                    this.shardMaster = newShardMaster // シャードを置き換える
+                    transaction.queueOrder
+                }
+
+                TransactionResult.FAILURE -> QueueOrder.RESET // 失敗すれば無かったことにする
             }
         }
     }
 }
 
-enum class QueueOrder {
-    CONTINUE,
-    DONE,
-    UNTIL_DONE,
-    RESET,
-    QUIT
+enum class QueueOrder { CONTINUE, DONE, UNTIL_DONE, RESET, QUIT }
+
+sealed class Record<out T : RecordEntity>() {
+    data class INSERTED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>() {
+        override fun getSequenceNumber(): String? = t.sequenceNumber
+    }
+
+    data class MODIFIED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>() {
+        override fun getSequenceNumber(): String? = t.sequenceNumber
+    }
+
+    data class REMOVED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>() {
+        override fun getSequenceNumber(): String? = t.sequenceNumber
+    }
+
+    object NONE : Record<Nothing>() {
+        override fun getSequenceNumber(): String? = null
+    }
+
+    object FINISHED : Record<Nothing>() {
+        override fun getSequenceNumber(): String? = null
+    }
+
+    abstract fun getSequenceNumber(): String?
 }
-
-sealed class Record<out T : Any>() {
-    data class INSERTED<out T : Any>(val sequenceNumber: String, val t: T) : Record<T>()
-    data class MODIFIED<out T : Any>(val sequenceNumber: String, val t: T) : Record<T>()
-    data class REMOVED<out T : Any>(val sequenceNumber: String, val t: T) : Record<T>()
-    object NONE : Record<Nothing>()
-    object FINISHED : Record<Nothing>()
-}
-
-

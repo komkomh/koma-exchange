@@ -15,28 +15,33 @@ object WorkerRepository {
 
     fun saveTransaction(
         transaction: Transaction,
-        shardMaster: ShardMaster,
+        oldShardMaster: ShardMaster,
+        newShardMaster: ShardMaster,
     ): TransactionResult {
 
         val requestBuilder = transaction.builder
 
-//        // Shard：sequenceNumberが更新されていればrollback TODO
-//        requestBuilder.addUpdateItem(
-//            shardMasterTable, TransactUpdateItemEnhancedRequest.builder(ShardMaster::class.java)
-//                .conditionExpression(
-//                    Expression.builder()
-//                        .expression("#sequenceNumber = :sequenceNumber")
-//                        .putExpressionName("#sequenceNumber", "sequenceNumber")
-//                        .putExpressionValue(
-//                            ":sequenceNumber",
-//                            AttributeValues.stringValue(shardMaster.first.sequenceNumber)
-//                        )
-//                        .build()
-//                )
-//                .item(shardMaster.second)
-//                .build()
-//        )
-        requestBuilder.addPutItem(shardMasterTable, shardMaster)
+        // Shard：sequenceNumberが更新されていればrollback
+        requestBuilder.addUpdateItem(
+            shardMasterTable, TransactUpdateItemEnhancedRequest.builder(ShardMaster::class.java)
+                .conditionExpression(
+                    Expression.builder()
+                        .expression("#sequenceNumber = :sequenceNumber")
+                        .putExpressionName("#sequenceNumber", "sequenceNumber")
+                        .putExpressionValue(":sequenceNumber", toAttributeValue(oldShardMaster.sequenceNumber))
+                        .build()
+                )
+                .conditionExpression(
+                    Expression.builder()
+                        .expression("#lockedMs = :lockedMs")
+                        .putExpressionName("#lockedMs", "lockedMs")
+                        .putExpressionValue(":lockedMs", toAttributeValue(oldShardMaster.lockedMs))
+                        .build()
+                )
+                .item(newShardMaster)
+                .build()
+        )
+//        requestBuilder.addPutItem(shardMasterTable, shardMaster)
 
         val request = requestBuilder.build()
         if (request.transactWriteItems().size <= 1) {

@@ -1,30 +1,26 @@
 package com.example.komaexchange.utils
 
+import com.example.komaexchange.entities.RecordEntity
 import com.example.komaexchange.wokrkers.Record
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-class RecordQueue<T : Any> {
+class RecordQueue<T : RecordEntity> {
     private val mutex: Mutex = Mutex()
-    private val queue = mutableListOf<Record<T>>()
+    private val recordList = mutableListOf<Record<T>>()
     private var peekCount = 0
+    var lastSequenceNumber: String? = null
 
     suspend fun offer(t: Record<T>): Record<T> {
-        mutex.withLock {
-            queue.add(t)
-        }
+        mutex.withLock { recordList.add(t) }
         return t
     }
 
     suspend fun peek(): Record<T> {
         mutex.withLock {
-            return when (queue.size > peekCount) {
-                true -> {
-                    val xx = queue[peekCount++]
-                    println("peek queue size = ${queue.size}, peedCount = ${peekCount}")
-                    xx
-                }
+            return when (recordList.size > peekCount) {
+                true -> recordList[peekCount++]
                 false -> Record.NONE
             }
         }
@@ -32,7 +28,7 @@ class RecordQueue<T : Any> {
 
     suspend fun peekWait(): Record<T> {
         while (true) {
-            when(val t = peek()) {
+            when (val t = peek()) {
                 is Record.NONE -> delay(500)
                 else -> return t
             }
@@ -41,7 +37,11 @@ class RecordQueue<T : Any> {
 
     suspend fun done(): RecordQueue<T> {
         mutex.withLock {
-            (0 until peekCount).forEach { _ -> queue.removeAt(0) }
+            lastSequenceNumber = when (peekCount < 1) {
+                true -> null
+                false -> recordList[peekCount - 1].getSequenceNumber()
+            }
+            (1..peekCount).forEach { _ -> recordList.removeAt(0) }
             peekCount = 0
         }
         return this
@@ -49,18 +49,25 @@ class RecordQueue<T : Any> {
 
     suspend fun untilDone(): RecordQueue<T> {
         mutex.withLock {
-            (0 until peekCount-1).forEach { _ -> queue.removeAt(0) }
+            lastSequenceNumber = when (peekCount < 2) {
+                true -> null
+                false -> recordList[peekCount - 2].getSequenceNumber()
+            }
+            (1 until peekCount).forEach { _ -> recordList.removeAt(0) }
             peekCount = 0
         }
         return this
     }
 
     suspend fun reset(): RecordQueue<T> {
-        mutex.withLock { peekCount = 0 }
+        mutex.withLock {
+            lastSequenceNumber = null
+            peekCount = 0
+        }
         return this
     }
 
     suspend fun size(): Int {
-        return mutex.withLock { queue.size }
+        return mutex.withLock { recordList.size }
     }
 }

@@ -7,7 +7,6 @@ import software.amazon.awssdk.enhanced.dynamodb.TableSchema
 import software.amazon.awssdk.enhanced.dynamodb.internal.AttributeValues
 import software.amazon.awssdk.enhanced.dynamodb.model.TransactUpdateItemEnhancedRequest
 import software.amazon.awssdk.enhanced.dynamodb.model.TransactWriteItemsEnhancedRequest
-import java.math.BigDecimal
 import java.util.*
 
 class TradeWorker(shardMaster: ShardMaster) : Worker<Order>(shardMaster) {
@@ -75,17 +74,15 @@ class TradeWorker(shardMaster: ShardMaster) : Worker<Order>(shardMaster) {
 
     // シャード受信の終了が検出された(このworkerも終わる)
     override fun recordFinished(): Transaction {
-        // TODO どうするか
-        // ShardMasterRepository.save(shardMaster.createDone())
         return createTransaction(QueueOrder.QUIT)
     }
 
     private fun createTransaction(queueOrder: QueueOrder): Transaction {
-        println("saveTransaction: size = ${tradeExecutor.resultItems.orders.size + tradeExecutor.resultItems.trades.size + tradeExecutor.resultItems.assets.size}")
+        println("saveTransaction: size = ${tradeExecutor.tradeResultItems.orders.size + tradeExecutor.tradeResultItems.trades.size + tradeExecutor.tradeResultItems.assets.size}")
         val requestBuilder = TransactWriteItemsEnhancedRequest.builder()
-        tradeExecutor.resultItems.orders.forEach { requestBuilder.addPutItem(orderTable, it) }
-        tradeExecutor.resultItems.trades.forEach { requestBuilder.addPutItem(tradeTable, it) }
-        tradeExecutor.resultItems.assets.forEach {
+        tradeExecutor.tradeResultItems.orders.forEach { requestBuilder.addPutItem(orderTable, it) }
+        tradeExecutor.tradeResultItems.trades.forEach { requestBuilder.addPutItem(tradeTable, it) }
+        tradeExecutor.tradeResultItems.assets.forEach {
             val oldAsset = assetCache[it.userId]!!
             // 資産が変更されていればrollback
             requestBuilder.addUpdateItem(
@@ -111,7 +108,7 @@ class TradeWorker(shardMaster: ShardMaster) : Worker<Order>(shardMaster) {
                 activeOrderCache.clear()
                 activeOrderCache.addAll(tradeExecutor.orders)
                 // 約定結果をクリアする
-                tradeExecutor.resultItems.clear()
+                tradeExecutor.tradeResultItems.clear()
             },
             failureFun = {
                 // 資産を取り直す
@@ -128,7 +125,7 @@ data class TradeExecutor(
     val assetMap: MutableMap<Long, Asset> = mutableMapOf(),
     val orders: MutableSet<Order> = sortedSetOf(),
     val maxItemCount: Int = 100,
-    var resultItems: TradeResultItems = TradeResultItems(
+    var tradeResultItems: TradeResultItems = TradeResultItems(
         mutableSetOf(), mutableSetOf(), mutableSetOf(), maxItemCount
     ),
 ) {
@@ -143,7 +140,7 @@ data class TradeExecutor(
         orders.addAll(orderCache.map { it.copy() })
 
         // 約定結果をクリアする
-        resultItems.clear()
+        tradeResultItems.clear()
     }
 
     // 約定
@@ -157,9 +154,13 @@ data class TradeExecutor(
                 .filter { it.tradeAction == TradeAction.MAKER }
                 .find { it.orderSide != takerOrder.orderSide }
 
-            val tradeResult = oneTrade(takerOrder, makerOrder)
-            when (merge(tradeResult)) {
-                true -> takerOrder = tradeResult.findTakerOrder() ?: return TradeResult.NOT_FULL
+            val newTradeResultItems = oneTrade(takerOrder, makerOrder)
+            when (tradeResultItems.count(newTradeResultItems) < maxItemCount) {
+                true -> {
+                    merge(newTradeResultItems)
+                    takerOrder = tradeResultItems.findTakerOrder() ?: return TradeResult.NOT_FULL
+                }
+
                 false -> return TradeResult.FULL
             }
         }
@@ -219,23 +220,18 @@ data class TradeExecutor(
         )
     }
 
-    private fun merge(newResultItems: TradeResultItems): Boolean {
-
-        if (resultItems.count(newResultItems) < maxItemCount) {
-            // 約定結果を更新する
-            resultItems.orders.removeAll(newResultItems.orders)
-            resultItems.orders.addAll(newResultItems.orders)
-            resultItems.trades.removeAll(newResultItems.trades)
-            resultItems.trades.addAll(newResultItems.trades)
-            resultItems.assets.removeAll(newResultItems.assets)
-            resultItems.assets.addAll(newResultItems.assets)
-            // 現在の約定実行のキャッシュを更新する
-            assetMap.putAll(resultItems.assets.map { it.userId to it.copy() })
-            orders.removeAll(resultItems.orders)
-            orders.addAll(resultItems.orders.filter { it.orderActive == OrderActive.ACTIVE }.map { it.copy() })
-            return true
-        }
-        return false
+    private fun merge(newResultItems: TradeResultItems) {
+        // 約定結果を更新する
+        tradeResultItems.orders.removeAll(newResultItems.orders)
+        tradeResultItems.orders.addAll(newResultItems.orders)
+        tradeResultItems.trades.removeAll(newResultItems.trades)
+        tradeResultItems.trades.addAll(newResultItems.trades)
+        tradeResultItems.assets.removeAll(newResultItems.assets)
+        tradeResultItems.assets.addAll(newResultItems.assets)
+        // 現在の約定実行のキャッシュを更新する
+        assetMap.putAll(tradeResultItems.assets.map { it.userId to it.copy() })
+        orders.removeAll(tradeResultItems.orders)
+        orders.addAll(tradeResultItems.orders.filter { it.orderActive == OrderActive.ACTIVE }.map { it.copy() })
     }
 
 }

@@ -1,10 +1,14 @@
 package com.example.komaexchange.repositories
 
-import com.example.komaexchange.entities.*
+import com.example.komaexchange.entities.Asset
+import com.example.komaexchange.entities.Order
+import com.example.komaexchange.entities.ShardMaster
+import com.example.komaexchange.entities.Trade
 import io.andrewohara.dynamokt.DataClassTableSchema
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbEnhancedClient
 import software.amazon.awssdk.enhanced.dynamodb.DynamoDbTable
-import kotlin.reflect.KClass
+import software.amazon.awssdk.enhanced.dynamodb.internal.AttributeValues
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue
 
 val dynamoDbClient: DynamoDbEnhancedClient = DynamoDbEnhancedClient.builder().build()
 
@@ -26,11 +30,10 @@ val shardMasterTable: DynamoDbTable<ShardMaster> = dynamoDbClient.table(
     ShardMaster::class.java.simpleName, DataClassTableSchema(ShardMaster::class)
 )
 
-val recordTable: DynamoDbTable<RecordEntity> = dynamoDbClient.table(
-    ShardMaster::class.java.simpleName, DataClassTableSchema(RecordEntity::class)
-)
+fun toAttributeValue(value: String?): AttributeValue {
+    return AttributeValues.stringValue(value)
+}
 
-val tableMap: Map<KClass<out Any>, DynamoDbTable<out Any>> = mapOf(
-    Order::class to orderTable,
-    Trade::class to tradeTable,
-)
+fun toAttributeValue(value: Long): AttributeValue {
+    return AttributeValues.numberValue(value)
+}
