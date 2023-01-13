@@ -89,7 +89,7 @@ data class Order(
         targetAmount: BigDecimal,
         tradePrice: BigDecimal,
         oppositeOrder: Order,
-        oppositeTradeId: String
+        oppositeTradeId: String,
     ): Trade {
         return Trade(
             currencyPair, // 通貨ペア
@@ -109,6 +109,7 @@ data class Order(
             BigDecimal.ZERO, // 約定手数料 TODO
             System.currentTimeMillis(), // 更新日時ms
             System.currentTimeMillis(), // 作成日時ms
+            "",
         )
     }
 

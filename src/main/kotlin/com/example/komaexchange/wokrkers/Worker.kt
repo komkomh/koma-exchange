@@ -31,9 +31,9 @@ abstract class Worker<T : RecordEntity>(var shardMaster: ShardMaster) {
 
     abstract fun getTableSchema(): TableSchema<T>
 
-    abstract fun recordInserted(entity: T): Transaction
-    abstract fun recordModified(entity: T): Transaction
-    abstract fun recordRemoved(entity: T): Transaction
+    abstract fun recordInserted(record: T): Transaction
+    abstract fun recordModified(record: T): Transaction
+    abstract fun recordRemoved(record: T): Transaction
     abstract fun recordNone(): Transaction
     abstract fun recordFinished(): Transaction
 
@@ -195,25 +195,9 @@ abstract class Worker<T : RecordEntity>(var shardMaster: ShardMaster) {
 enum class QueueOrder { CONTINUE, DONE, UNTIL_DONE, RESET, QUIT }
 
 sealed class Record<out T : RecordEntity>(val currentSequenceNumber: String? = null) {
-    data class INSERTED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>(sequenceNumber) {
-//        override fun currentSequenceNumber(): String? = t.sequenceNumber
-    }
-
-    data class MODIFIED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>(sequenceNumber) {
-//        override fun currentSequenceNumber(): String? = t.sequenceNumber
-    }
-
-    data class REMOVED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>(sequenceNumber) {
-//        override fun currentSequenceNumber(): String? = t.sequenceNumber
-    }
-
-    object NONE : Record<Nothing>() {
-//        override fun currentSequenceNumber(): String? = null
-    }
-
-    object FINISHED : Record<Nothing>() {
-//        override fun currentSequenceNumber(): String? = null
-    }
-//
-//    abstract fun currentSequenceNumber(): String?
+    data class INSERTED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>(sequenceNumber)
+    data class MODIFIED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>(sequenceNumber)
+    data class REMOVED<out T : RecordEntity>(val sequenceNumber: String, val t: T) : Record<T>(sequenceNumber)
+    object NONE : Record<Nothing>()
+    object FINISHED : Record<Nothing>()
 }

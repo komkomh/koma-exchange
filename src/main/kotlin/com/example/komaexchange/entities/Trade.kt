@@ -29,6 +29,7 @@ data class Trade(
     val fee: BigDecimal, // 約定手数料
     val updatedAtNs: Long, // 更新日時ns
     val createdAtNs: Long, // 作成日時ns
-    val createdAt: String = LocalDateTime.now().toString()
-) {
+    override var sequenceNumber: String?, // 処理ID
+    val createdAt: String = LocalDateTime.now().toString(),
+) : RecordEntity(sequenceNumber) {
 }
